@@ -6,7 +6,7 @@ Workflows GitHub Actions réutilisables pour les dépôts du studio. Le dépôt 
 
 Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` dans le SaaS. Le workflow est épinglé au commit immuable :
 
-`e324a8e007871fc2ae8ee43a9a0c1fdae207e979` (`v1.0.0`)
+`b63d41bfe270b99ff69afa069f3c48fdfc4311d0` (`v1.0.0`)
 
 Le SaaS doit fournir les scripts pnpm `lint`, `typecheck`, `test`, `build`, `test:a11y` et `lighthouse`, un `pnpm-lock.yaml` commité et un Dockerfile multi-stage.
 
@@ -26,11 +26,11 @@ La publication d'image nécessite un workflow séparé, déclenché uniquement p
 
 ## Appel depuis un dépôt d'infrastructure
 
-Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Le caller active le contrôle générique du dépôt puis, avec `run-infrastructure-static: true`, la syntaxe Bash, ShellCheck, les tests de contrat locaux, les modèles Compose sans secrets et la cohérence tag/digest/architecture des images. Aucun accès SSH ou secret de déploiement n'est utilisé.
+Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Le caller active le contrôle générique du dépôt puis, avec `run-infrastructure-static: true`, la syntaxe Bash, les erreurs ShellCheck, les tests de contrat locaux, les modèles Compose sans secrets ainsi que l'existence et l'architecture des digests épinglés. Aucun accès SSH ou secret de déploiement n'est utilisé.
 
 Le workflow transverse est épinglé au commit immuable :
 
-`e324a8e007871fc2ae8ee43a9a0c1fdae207e979` (`v1.0.0`)
+`b63d41bfe270b99ff69afa069f3c48fdfc4311d0` (`v1.0.0`)
 
 ## Maintenance Renovate
 
