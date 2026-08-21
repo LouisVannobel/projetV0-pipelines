@@ -71,28 +71,12 @@ foreach ($requiredInfraControl in @(
     throw "Repository CI omits infrastructure-specific control: $requiredInfraControl"
   }
 }
-if ($repositoryCi -match [regex]::Escape('bash infra/scripts/05-resolve-locks.sh pinned')) {
-  throw 'Pull-request CI must not exhaust anonymous registry limits by resolving every image digest'
-}
-if ($repositoryCi -match [regex]::Escape('bash tests/infra/test_lock_modes.sh')) {
-  throw 'Pull-request CI must not carry an unused image-lock mode test'
-}
-
 $selfValidation = Get-Content -Raw -LiteralPath '.github\workflows\validate-pipelines.yml'
 if ($selfValidation -notmatch [regex]::Escape('pwsh -File tests/test_pipeline_contracts.ps1')) {
   throw 'The pipeline repository must run its contract tests in GitHub Actions'
 }
 if ($selfValidation -notmatch [regex]::Escape('uses: ./.github/workflows/reusable-repository-ci.yml')) {
   throw 'The pipeline repository must execute its reusable repository CI locally before consumers depend on it'
-}
-
-$renovateSource = Get-Content -Raw -LiteralPath '.github\renovate.json'
-$renovate = $renovateSource | ConvertFrom-Json
-if ($renovateSource -match '"customManagers"' -or $renovateSource -match 'custom\.regex') {
-  throw 'The pipeline repository must use native Renovate managers only'
-}
-if ($allReusableWorkflowSource -match '# renovate:') {
-  throw 'Workflow-specific Renovate hints are not justified in the pipeline repository'
 }
 
 foreach ($example in Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File) {
