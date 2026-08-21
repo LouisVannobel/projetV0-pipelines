@@ -123,6 +123,3 @@ jobs:
       - name: Test image lock verification modes
         shell: bash
         run: bash tests/infra/test_lock_modes.sh
-      - name: Verify pinned image digests and architecture
-        shell: bash
-        run: bash infra/scripts/05-resolve-locks.sh pinned

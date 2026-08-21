@@ -71,13 +71,15 @@ foreach ($requiredInfraControl in @(
   'pwsh -NoProfile -File tests/infra/test_shared_ci.ps1',
   'bash tests/infra/test_lib.sh',
   'bash tests/infra/test_lock_modes.sh',
-  'bash infra/scripts/05-resolve-locks.sh pinned',
   'docker compose --env-file infra/locks/images.env',
   'config --no-interpolate --quiet'
 )) {
   if ($repositoryCi -notmatch [regex]::Escape($requiredInfraControl)) {
     throw "Repository CI omits infrastructure-specific control: $requiredInfraControl"
   }
+}
+if ($repositoryCi -match [regex]::Escape('bash infra/scripts/05-resolve-locks.sh pinned')) {
+  throw 'Pull-request CI must not exhaust anonymous registry limits by resolving every image digest'
 }
 
 $selfValidation = Get-Content -Raw -LiteralPath '.github\workflows\validate-pipelines.yml'

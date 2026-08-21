@@ -26,7 +26,7 @@ La publication d'image nécessite un workflow séparé, déclenché uniquement p
 
 ## Appel depuis un dépôt d'infrastructure
 
-Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Le caller active le contrôle générique du dépôt puis, avec `run-infrastructure-static: true`, la syntaxe Bash, les erreurs ShellCheck, les tests de contrat locaux, les modèles Compose sans secrets ainsi que l'existence et l'architecture des digests épinglés. Aucun accès SSH ou secret de déploiement n'est utilisé.
+Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Le caller active le contrôle générique du dépôt puis, avec `run-infrastructure-static: true`, la syntaxe Bash, les erreurs ShellCheck, les tests de contrat locaux, les modèles Compose sans secrets et le contrat des locks d'images. Aucun accès SSH, secret de déploiement ou balayage anonyme de registre n'est utilisé.
 
 Le workflow transverse est épinglé au commit immuable :
 
