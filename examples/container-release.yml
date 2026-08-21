@@ -9,7 +9,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: projetV0/pipelines/.github/workflows/reusable-container-release.yml@a9b2e878d829f1390d40ff7302993637ac74364d
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-container-release.yml@a9b2e878d829f1390d40ff7302993637ac74364d
     with:
       registry-username: ${{ github.actor }}
       image: ghcr.io/louisvannobel/my-saas

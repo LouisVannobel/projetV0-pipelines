@@ -1,4 +1,4 @@
-# projetV0/pipelines
+# projetV0-pipelines
 
 Workflows GitHub Actions réutilisables pour les dépôts du studio. Le dépôt sépare strictement la CI de pull request, en lecture seule, de la publication d'images OCI.
 

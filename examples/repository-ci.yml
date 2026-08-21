@@ -10,4 +10,4 @@ permissions:
 
 jobs:
   security:
-    uses: projetV0/pipelines/.github/workflows/reusable-repository-ci.yml@148874d14d9263eba399e0d9d883fab3c2610336
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-repository-ci.yml@148874d14d9263eba399e0d9d883fab3c2610336

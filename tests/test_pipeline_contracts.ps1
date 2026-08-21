@@ -40,6 +40,15 @@ if ($selfValidation -notmatch [regex]::Escape('pwsh -File tests/test_pipeline_co
   throw 'The pipeline repository must run its contract tests in GitHub Actions'
 }
 
+foreach ($example in Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File) {
+  $source = Get-Content -Raw -LiteralPath $example.FullName
+  foreach ($call in [regex]::Matches($source, '(?m)^\s*uses:\s+([^\s]+)')) {
+    if ($call.Groups[1].Value -notmatch '^LouisVannobel/projetV0-pipelines/.+@[0-9a-f]{40}$') {
+      throw "Example caller must use the personal Pro repository at an immutable SHA: $($call.Groups[1].Value)"
+    }
+  }
+}
+
 $actionlintExe = $env:ACTIONLINT_EXE
 if ($actionlintExe) {
   if (-not (Test-Path -LiteralPath $actionlintExe)) { throw "actionlint executable not found: $actionlintExe" }
