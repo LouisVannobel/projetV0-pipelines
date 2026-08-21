@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout without persisted credentials
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Test reusable workflow contracts
@@ -24,10 +24,12 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          archive=actionlint_1.7.12_linux_amd64.tar.gz
+          # renovate: datasource=github-releases depName=rhysd/actionlint
+          actionlint_version=v1.7.12
+          archive="actionlint_${actionlint_version#v}_linux_amd64.tar.gz"
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
             --output "$RUNNER_TEMP/$archive" \
-            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/$archive"
+            "https://github.com/rhysd/actionlint/releases/download/${actionlint_version}/$archive"
           printf '%s  %s\n' \
             '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8' \
             "$RUNNER_TEMP/$archive" | sha256sum --check
@@ -37,10 +39,12 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          archive=gitleaks_8.30.1_linux_x64.tar.gz
+          # renovate: datasource=github-releases depName=gitleaks/gitleaks
+          gitleaks_version=v8.30.1
+          archive="gitleaks_${gitleaks_version#v}_linux_x64.tar.gz"
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
             --output "$RUNNER_TEMP/$archive" \
-            "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/$archive"
+            "https://github.com/gitleaks/gitleaks/releases/download/${gitleaks_version}/$archive"
           printf '%s  %s\n' \
             '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb' \
             "$RUNNER_TEMP/$archive" | sha256sum --check

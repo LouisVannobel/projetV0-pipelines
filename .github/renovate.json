@@ -15,7 +15,7 @@
   "packageRules": [
     {
       "description": "No dependency update bypasses human review during the experimental phase",
-      "matchManagers": ["github-actions", "dockerfile", "docker-compose", "npm"],
+      "matchManagers": ["github-actions", "dockerfile", "docker-compose", "npm", "custom.regex"],
       "automerge": false
     },
     {
@@ -24,20 +24,28 @@
       "labels": ["dependencies", "breaking-change"]
     },
     {
-      "description": "Group non-breaking GitHub Actions updates",
-      "matchManagers": ["github-actions"],
+      "description": "Group non-breaking CI tool updates",
+      "matchManagers": ["github-actions", "custom.regex"],
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "github-actions"
     }
   ],
   "customManagers": [
     {
+      "description": "Track checksum-pinned CLI releases embedded in workflows",
       "customType": "regex",
-      "managerFilePatterns": ["/^infra/locks/images\\.env$/"],
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
       "matchStrings": [
-        "(?:^|\\n)[A-Z0-9_]+_TAG=(?<depName>[a-z0-9._/-]+):(?<currentValue>[^\\s]+)"
-      ],
-      "datasourceTemplate": "docker"
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s+[a-z0-9_]+_version=(?<currentValue>v?\\d+\\.\\d+\\.\\d+)"
+      ]
+    },
+    {
+      "description": "Track the reusable SaaS pnpm default",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/reusable-saas-ci\\.yml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s+default:\\s+[\\\"]?(?<currentValue>\\d+\\.\\d+\\.\\d+)[\\\"]?"
+      ]
     }
   ]
 }
