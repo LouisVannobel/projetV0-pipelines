@@ -1,0 +1,18 @@
+name: Release container
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    permissions:
+      contents: read
+      packages: write
+    uses: LouisVannobel/studio-pipelines/.github/workflows/reusable-container-release.yml@a9b2e878d829f1390d40ff7302993637ac74364d
+    with:
+      registry-username: ${{ github.actor }}
+      image: ghcr.io/louisvannobel/my-saas
+      version: ${{ github.ref_name }}
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}

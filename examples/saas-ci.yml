@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: LouisVannobel/studio-pipelines/.github/workflows/reusable-saas-ci.yml@a9b2e878d829f1390d40ff7302993637ac74364d
+    with:
+      node-version: "24"
+      pnpm-version: "11.21.0"
+      image-name: studio/my-saas
