@@ -46,3 +46,7 @@ jobs:
             "$RUNNER_TEMP/$archive" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" detect --source . --redact --no-banner --exit-code 1
+
+  repository-security:
+    name: Reusable repository CI
+    uses: ./.github/workflows/reusable-repository-ci.yml

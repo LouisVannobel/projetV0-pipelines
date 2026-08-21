@@ -39,6 +39,9 @@ $selfValidation = Get-Content -Raw -LiteralPath '.github\workflows\validate-pipe
 if ($selfValidation -notmatch [regex]::Escape('pwsh -File tests/test_pipeline_contracts.ps1')) {
   throw 'The pipeline repository must run its contract tests in GitHub Actions'
 }
+if ($selfValidation -notmatch [regex]::Escape('uses: ./.github/workflows/reusable-repository-ci.yml')) {
+  throw 'The pipeline repository must execute its reusable repository CI locally before consumers depend on it'
+}
 
 foreach ($example in Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File) {
   $source = Get-Content -Raw -LiteralPath $example.FullName
