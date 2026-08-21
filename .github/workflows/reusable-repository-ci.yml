@@ -1,25 +1,22 @@
-name: Validate pipelines
+name: Reusable repository CI
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
-  validate:
+  repository-security:
+    name: Repository security
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Checkout without persisted credentials
+      - name: Checkout full history without persisted credentials
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Test reusable workflow contracts
-        shell: pwsh
-        run: pwsh -File tests/test_pipeline_contracts.ps1
+          fetch-depth: 0
       - name: Validate GitHub Actions syntax
         shell: bash
         run: |
@@ -32,8 +29,10 @@ jobs:
             '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8' \
             "$RUNNER_TEMP/$archive" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint" .github/workflows/*.yml examples/*.yml
-      - name: Scan repository for secrets
+          find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 \
+            | sort -z \
+            | xargs -0 --no-run-if-empty "$RUNNER_TEMP/actionlint"
+      - name: Scan the complete Git history for secrets
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -45,4 +44,16 @@ jobs:
             '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb' \
             "$RUNNER_TEMP/$archive" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
-          "$RUNNER_TEMP/gitleaks" detect --source . --redact --no-banner --exit-code 1
+          export PATH="$RUNNER_TEMP:$PATH"
+          config=()
+          [[ ! -f .gitleaks.toml ]] || config=(--config .gitleaks.toml)
+          gitleaks git . "${config[@]}" --redact --no-banner --exit-code 1
+      - name: Scan repository vulnerabilities and misconfiguration
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          scanners: 'vuln,misconfig,secret,license'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '1'
