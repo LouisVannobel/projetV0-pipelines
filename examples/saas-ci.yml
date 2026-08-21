@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   ci:
-    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-saas-ci.yml@a9b2e878d829f1390d40ff7302993637ac74364d
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-saas-ci.yml@399df8dcb93a28734269ad11b63e847896684487 # v1.0.0
     with:
       node-version: "24"
       pnpm-version: "11.21.0"

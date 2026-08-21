@@ -6,7 +6,7 @@ Workflows GitHub Actions réutilisables pour les dépôts du studio. Le dépôt 
 
 Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` dans le SaaS. Le workflow est épinglé au commit immuable :
 
-`a9b2e878d829f1390d40ff7302993637ac74364d`
+`399df8dcb93a28734269ad11b63e847896684487` (`v1.0.0`)
 
 Le SaaS doit fournir les scripts pnpm `lint`, `typecheck`, `test`, `build`, `test:a11y` et `lighthouse`, un `pnpm-lock.yaml` commité et un Dockerfile multi-stage.
 
@@ -19,14 +19,14 @@ Le SaaS doit fournir les scripts pnpm `lint`, `typecheck`, `test`, `build`, `tes
 - Trivy sur le dépôt et l'image ;
 - image de release avec SBOM et provenance ;
 - actions tierces épinglées à leur SHA Git complet ;
-- Renovate configuré sans automerge.
+- Checkout v7.0.1, Trivy CLI v0.74.0, Buildx v0.36.1 et son daemon BuildKit v0.32.2 explicitement épinglés.
 
-La publication d'image nécessite un workflow séparé, déclenché uniquement par une release protégée, utilisant `examples/container-release.yml`.
+`examples/container-release.yml` est un template expérimental non activé. Avant un usage en production, le dépôt consommateur doit protéger ses tags et publier exactement le digest scanné sans rebuild.
 
 ## Appel depuis un dépôt d'infrastructure
 
-Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Ce caller déclenche uniquement actionlint, une analyse Gitleaks de tout l'historique Git et l'analyse Trivy du dépôt ; il ne suppose ni Node.js, ni pnpm, ni Dockerfile.
+Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Le caller active le contrôle générique du dépôt puis, avec `run-infrastructure-static: true`, la syntaxe Bash, les erreurs ShellCheck, les tests de contrat locaux, les modèles Compose sans secrets et le contrat des locks d'images. Aucun accès SSH, secret de déploiement ou balayage anonyme de registre n'est utilisé.
 
 Le workflow transverse est épinglé au commit immuable :
 
-`3b3d131bfda6078c38fd2bec0c1acd58f55b8726`
+`399df8dcb93a28734269ad11b63e847896684487` (`v1.0.0`)

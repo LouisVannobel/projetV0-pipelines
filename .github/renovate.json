@@ -29,15 +29,5 @@
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "github-actions"
     }
-  ],
-  "customManagers": [
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^infra/locks/images\\.env$/"],
-      "matchStrings": [
-        "(?:^|\\n)[A-Z0-9_]+_TAG=(?<depName>[a-z0-9._/-]+):(?<currentValue>[^\\s]+)"
-      ],
-      "datasourceTemplate": "docker"
-    }
   ]
 }
