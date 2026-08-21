@@ -46,6 +46,15 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s+default:\\s+[\\\"]?(?<currentValue>\\d+\\.\\d+\\.\\d+)[\\\"]?"
       ]
+    },
+    {
+      "description": "Track the BuildKit image used by the Buildx container driver",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": [
+        "(?<indentation>[ \\t]*)# renovate: datasource=(?<datasource>docker) depName=(?<depName>moby/buildkit)\\s+driver-opts:\\s+image=moby/buildkit:(?<currentValue>v?\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "autoReplaceStringTemplate": "{{{indentation}}}# renovate: datasource=docker depName={{{depName}}}\n{{{indentation}}}driver-opts: image={{{depName}}}:{{{newValue}}}@{{{newDigest}}}"
     }
   ]
 }

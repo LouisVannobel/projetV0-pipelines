@@ -38,6 +38,11 @@ $buildxVersions = @([regex]::Matches($allReusableWorkflowSource, "(?m)^\s+versio
 if ($buildxUses.Count -eq 0 -or $buildxUses.Count -ne $buildxVersions.Count) {
   throw 'Every Buildx setup invocation must pin Buildx v0.36.1 explicitly'
 }
+$buildKitRef = 'driver-opts: image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8'
+$buildKitPins = @([regex]::Matches($allReusableWorkflowSource, "(?m)^\s+$([regex]::Escape($buildKitRef))\s*$"))
+if ($buildKitPins.Count -ne $buildxUses.Count) {
+  throw 'Every Buildx invocation must use the reviewed BuildKit v0.32.2 image digest'
+}
 
 $repositoryCi = Get-Content -Raw -LiteralPath '.github\workflows\reusable-repository-ci.yml'
 foreach ($requiredControl in @(
@@ -90,6 +95,7 @@ $renovateHintCounts = @{
   'rhysd/actionlint' = 2
   'gitleaks/gitleaks' = 3
   'koalaman/shellcheck' = 1
+  'moby/buildkit' = 3
   'pnpm' = 1
 }
 foreach ($dependency in $renovateHintCounts.Keys) {
@@ -106,7 +112,9 @@ foreach ($dependency in $renovateHintCounts.Keys) {
 $renovateSource = Get-Content -Raw -LiteralPath '.github\renovate.json'
 $renovate = $renovateSource | ConvertFrom-Json
 $customManagerSource = ($renovate.customManagers | ConvertTo-Json -Depth 10)
-if ($customManagerSource -notmatch 'github/workflows' -or $customManagerSource -notmatch 'currentValue') {
+if ($customManagerSource -notmatch 'github/workflows' -or
+    $customManagerSource -notmatch 'currentValue' -or
+    $customManagerSource -notmatch 'currentDigest') {
   throw 'Renovate must extract checksum-pinned CLI and pnpm default versions from workflow files'
 }
 $reviewedManagers = @($renovate.packageRules | ForEach-Object matchManagers | Where-Object { $_ })
