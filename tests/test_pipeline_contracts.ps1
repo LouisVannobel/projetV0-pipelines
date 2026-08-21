@@ -114,11 +114,19 @@ if ($reviewedManagers -notcontains 'custom.regex') {
 
 foreach ($example in Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File) {
   $source = Get-Content -Raw -LiteralPath $example.FullName
-  foreach ($call in [regex]::Matches($source, '(?m)^\s*uses:\s+([^\s]+)')) {
+  foreach ($call in [regex]::Matches($source, '(?m)^\s*uses:\s+([^\s]+)(?<comment>\s+#\s+v\d+\.\d+\.\d+)?\s*$')) {
     if ($call.Groups[1].Value -notmatch '^LouisVannobel/projetV0-pipelines/.+@[0-9a-f]{40}$') {
       throw "Example caller must use the personal Pro repository at an immutable SHA: $($call.Groups[1].Value)"
     }
+    if (-not $call.Groups['comment'].Success) {
+      throw "Example caller must retain a semantic version comment for Renovate: $($call.Groups[1].Value)"
+    }
   }
+}
+
+$repositoryExample = Get-Content -Raw -LiteralPath 'examples\repository-ci.yml'
+if ($repositoryExample -notmatch '(?ms)^\s*with:\s*$.*^\s+run-infrastructure-static:\s*true\s*$') {
+  throw 'The infrastructure example must enable repository-local static validation'
 }
 
 $actionlintExe = $env:ACTIONLINT_EXE
