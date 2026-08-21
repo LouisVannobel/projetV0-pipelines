@@ -29,4 +29,4 @@ Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Ce caller d
 
 Le workflow transverse est épinglé au commit immuable :
 
-`148874d14d9263eba399e0d9d883fab3c2610336`
+`3b3d131bfda6078c38fd2bec0c1acd58f55b8726`
