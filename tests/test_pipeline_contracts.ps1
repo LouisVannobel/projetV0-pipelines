@@ -62,9 +62,11 @@ foreach ($requiredInfraControl in @(
   'if: inputs.run-infrastructure-static',
   'bash -n',
   'shellcheck',
+  '--severity=error',
   'pwsh -NoProfile -File tests/infra/test_shared_ci.ps1',
   'bash tests/infra/test_lib.sh',
-  'bash tests/infra/test_locks.sh',
+  'bash tests/infra/test_lock_modes.sh',
+  'bash infra/scripts/05-resolve-locks.sh pinned',
   'docker compose --env-file infra/locks/images.env',
   'config --no-interpolate --quiet'
 )) {

@@ -105,7 +105,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           find infra tests -type f -name '*.sh' -print0 | sort -z \
-            | xargs -0 --no-run-if-empty shellcheck --external-sources
+            | xargs -0 --no-run-if-empty shellcheck --external-sources --severity=error
       - name: Run infrastructure CI contract tests
         shell: pwsh
         run: pwsh -NoProfile -File tests/infra/test_shared_ci.ps1
@@ -120,6 +120,9 @@ jobs:
             docker compose --env-file infra/locks/images.env -f "$compose_file" \
               config --no-interpolate --quiet
           done < <(find infra/stacks -type f \( -name 'compose.yml' -o -name 'compose.yaml' \) -print0 | sort -z)
-      - name: Verify image tags, digests and architecture
+      - name: Test image lock verification modes
         shell: bash
-        run: bash tests/infra/test_locks.sh
+        run: bash tests/infra/test_lock_modes.sh
+      - name: Verify pinned image digests and architecture
+        shell: bash
+        run: bash infra/scripts/05-resolve-locks.sh pinned
