@@ -21,7 +21,7 @@ Le SaaS doit fournir les scripts pnpm `lint`, `typecheck`, `test`, `build`, `tes
 - actions tierces épinglées à leur SHA Git complet ;
 - Checkout v7.0.1, Trivy CLI v0.74.0, Buildx v0.36.1 et son daemon BuildKit v0.32.2 explicitement épinglés.
 
-La publication d'image nécessite un workflow séparé, déclenché uniquement par une release protégée, utilisant `examples/container-release.yml`.
+`examples/container-release.yml` est un template expérimental non activé. Avant un usage en production, le dépôt consommateur doit protéger ses tags et publier exactement le digest scanné sans rebuild.
 
 ## Appel depuis un dépôt d'infrastructure
 

@@ -1,3 +1,4 @@
+# Experimental template: protect release tags and promote the scanned digest before production use.
 name: Release container
 
 on:
