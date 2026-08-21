@@ -1,6 +1,6 @@
-# Studio Pipelines
+# projetV0-pipelines
 
-Workflows GitHub Actions réutilisables pour les SaaS du studio. Le dépôt sépare strictement la CI de pull request, en lecture seule, de la publication d'images OCI.
+Workflows GitHub Actions réutilisables pour les dépôts du studio. Le dépôt sépare strictement la CI de pull request, en lecture seule, de la publication d'images OCI.
 
 ## Appel depuis un SaaS
 
@@ -22,3 +22,11 @@ Le SaaS doit fournir les scripts pnpm `lint`, `typecheck`, `test`, `build`, `tes
 - Renovate configuré sans automerge.
 
 La publication d'image nécessite un workflow séparé, déclenché uniquement par une release protégée, utilisant `examples/container-release.yml`.
+
+## Appel depuis un dépôt d'infrastructure
+
+Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Ce caller déclenche uniquement actionlint, une analyse Gitleaks de tout l'historique Git et l'analyse Trivy du dépôt ; il ne suppose ni Node.js, ni pnpm, ni Dockerfile.
+
+Le workflow transverse est épinglé au commit immuable :
+
+`148874d14d9263eba399e0d9d883fab3c2610336`
