@@ -6,7 +6,7 @@ Workflows GitHub Actions réutilisables pour les dépôts du studio. Le dépôt 
 
 Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` dans le SaaS. Le workflow est épinglé au commit immuable :
 
-`000869f3edd295b10382a4fa72b5b387ecc702c6` (`v1.0.0`)
+`1a64e494c503c2e95fb5b851407fdbb87ab1fb43` (`v1.0.0`)
 
 Le SaaS doit fournir les scripts pnpm `lint`, `typecheck`, `test`, `build`, `test:a11y` et `lighthouse`, un `pnpm-lock.yaml` commité et un Dockerfile multi-stage.
 
@@ -29,4 +29,4 @@ Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Le caller a
 
 Le workflow transverse est épinglé au commit immuable :
 
-`000869f3edd295b10382a4fa72b5b387ecc702c6` (`v1.0.0`)
+`1a64e494c503c2e95fb5b851407fdbb87ab1fb43` (`v1.0.0`)

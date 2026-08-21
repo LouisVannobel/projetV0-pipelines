@@ -10,6 +10,6 @@ permissions:
 
 jobs:
   security:
-    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-repository-ci.yml@000869f3edd295b10382a4fa72b5b387ecc702c6 # v1.0.0
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-repository-ci.yml@1a64e494c503c2e95fb5b851407fdbb87ab1fb43 # v1.0.0
     with:
       run-infrastructure-static: true
