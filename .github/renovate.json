@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "dependencyDashboard": true,
+  "minimumReleaseAge": "7 days",
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "rangeStrategy": "pin",
+  "schedule": ["after 07:00 and before 10:00 on monday"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "No dependency update bypasses human review during the experimental phase",
+      "matchManagers": ["github-actions", "dockerfile", "docker-compose", "npm"],
+      "automerge": false
+    },
+    {
+      "description": "Keep breaking updates isolated",
+      "matchUpdateTypes": ["major"],
+      "labels": ["dependencies", "breaking-change"]
+    },
+    {
+      "description": "Group non-breaking GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "github-actions"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^infra/locks/images\\.env$/"],
+      "matchStrings": [
+        "(?:^|\\n)[A-Z0-9_]+_TAG=(?<depName>[a-z0-9._/-]+):(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ]
+}
