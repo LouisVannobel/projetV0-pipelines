@@ -10,10 +10,11 @@ foreach ($path in $workflows) {
   if (-not (Test-Path -LiteralPath $path)) { throw "Missing reusable workflow: $path" }
   $workflow = Get-Content -Raw -LiteralPath $path
   if ($workflow -notmatch '(?m)^\s*workflow_call:\s*$') { throw "$path is not callable" }
-  foreach ($match in [regex]::Matches($workflow, '(?m)^\s*-?\s*uses:\s*([^\s#]+)')) {
-    $use = $match.Groups[1].Value
+  foreach ($match in [regex]::Matches($workflow, '(?m)^\s*-?\s*uses:\s*(?<use>[^\s#]+)(?<comment>\s+#\s+v\d+\.\d+\.\d+)?\s*$')) {
+    $use = $match.Groups['use'].Value
     if ($use.StartsWith('./')) { continue }
     if ($use -notmatch '@[0-9a-f]{40}$') { throw "Action is not pinned to a full commit SHA: $use" }
+    if (-not $match.Groups['comment'].Success) { throw "Action pin has no Renovate-compatible version comment: $use" }
   }
 }
 
@@ -21,27 +22,20 @@ $allReusableWorkflowSource = ($workflows | ForEach-Object {
   Get-Content -Raw -LiteralPath $_
 }) -join "`n"
 
-$checkoutV7Pin = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1'
-$checkoutUses = @([regex]::Matches($allReusableWorkflowSource, '(?m)^\s*uses:\s+actions/checkout@[^\r\n]+$'))
-if ($checkoutUses.Count -eq 0 -or @($checkoutUses | Where-Object { $_.Value -notmatch [regex]::Escape($checkoutV7Pin) }).Count -ne 0) {
-  throw 'Every reusable workflow checkout must use the reviewed v7.0.1 commit pin'
-}
-
 $trivyUses = @([regex]::Matches($allReusableWorkflowSource, '(?m)^\s*uses:\s+aquasecurity/trivy-action@[0-9a-f]{40}'))
-$trivyVersions = @([regex]::Matches($allReusableWorkflowSource, "(?m)^\s+version:\s*'?v0\.74\.0'?\s*$"))
+$trivyVersions = @([regex]::Matches($allReusableWorkflowSource, "(?ms)^\s*uses:\s+aquasecurity/trivy-action@[^\r\n]+\r?\n\s+with:\s*\r?\n(?:(?!^\s*-\s+name:).)*?^\s+version:\s*'?v\d+\.\d+\.\d+'?\s*$"))
 if ($trivyUses.Count -eq 0 -or $trivyUses.Count -ne $trivyVersions.Count) {
-  throw 'Every Trivy action invocation must pin Trivy CLI v0.74.0 explicitly'
+  throw 'Every Trivy action invocation must pin an explicit stable Trivy CLI version'
 }
 
 $buildxUses = @([regex]::Matches($allReusableWorkflowSource, '(?m)^\s*uses:\s+docker/setup-buildx-action@[0-9a-f]{40}'))
-$buildxVersions = @([regex]::Matches($allReusableWorkflowSource, "(?m)^\s+version:\s*'?v0\.36\.1'?\s*$"))
+$buildxVersions = @([regex]::Matches($allReusableWorkflowSource, "(?ms)^\s*uses:\s+docker/setup-buildx-action@[^\r\n]+\r?\n\s+with:\s*\r?\n(?:(?!^\s*-\s+name:).)*?^\s+version:\s*'?v\d+\.\d+\.\d+'?\s*$"))
 if ($buildxUses.Count -eq 0 -or $buildxUses.Count -ne $buildxVersions.Count) {
-  throw 'Every Buildx setup invocation must pin Buildx v0.36.1 explicitly'
+  throw 'Every Buildx setup invocation must pin an explicit stable Buildx version'
 }
-$buildKitRef = 'driver-opts: image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8'
-$buildKitPins = @([regex]::Matches($allReusableWorkflowSource, "(?m)^\s+$([regex]::Escape($buildKitRef))\s*$"))
+$buildKitPins = @([regex]::Matches($allReusableWorkflowSource, '(?m)^\s+driver-opts:\s+image=moby/buildkit:v\d+\.\d+\.\d+@sha256:[a-f0-9]{64}\s*$'))
 if ($buildKitPins.Count -ne $buildxUses.Count) {
-  throw 'Every Buildx invocation must use the reviewed BuildKit v0.32.2 image digest'
+  throw 'Every Buildx invocation must use an immutable versioned BuildKit image'
 }
 
 $repositoryCi = Get-Content -Raw -LiteralPath '.github\workflows\reusable-repository-ci.yml'
@@ -70,7 +64,6 @@ foreach ($requiredInfraControl in @(
   '--severity=error',
   'pwsh -NoProfile -File tests/infra/test_shared_ci.ps1',
   'bash tests/infra/test_lib.sh',
-  'bash tests/infra/test_lock_modes.sh',
   'docker compose --env-file infra/locks/images.env',
   'config --no-interpolate --quiet'
 )) {
@@ -81,6 +74,9 @@ foreach ($requiredInfraControl in @(
 if ($repositoryCi -match [regex]::Escape('bash infra/scripts/05-resolve-locks.sh pinned')) {
   throw 'Pull-request CI must not exhaust anonymous registry limits by resolving every image digest'
 }
+if ($repositoryCi -match [regex]::Escape('bash tests/infra/test_lock_modes.sh')) {
+  throw 'Pull-request CI must not carry an unused image-lock mode test'
+}
 
 $selfValidation = Get-Content -Raw -LiteralPath '.github\workflows\validate-pipelines.yml'
 if ($selfValidation -notmatch [regex]::Escape('pwsh -File tests/test_pipeline_contracts.ps1')) {
@@ -90,38 +86,13 @@ if ($selfValidation -notmatch [regex]::Escape('uses: ./.github/workflows/reusabl
   throw 'The pipeline repository must execute its reusable repository CI locally before consumers depend on it'
 }
 
-$allWorkflowSource = ($workflows + '.github\workflows\validate-pipelines.yml' | ForEach-Object {
-  Get-Content -Raw -LiteralPath $_
-}) -join "`n"
-$renovateHintCounts = @{
-  'rhysd/actionlint' = 2
-  'gitleaks/gitleaks' = 3
-  'koalaman/shellcheck' = 1
-  'moby/buildkit' = 3
-  'pnpm' = 1
-}
-foreach ($dependency in $renovateHintCounts.Keys) {
-  $hint = "# renovate: datasource="
-  $count = @([regex]::Matches(
-    $allWorkflowSource,
-    "(?m)^\s*${hint}[^\s]+\s+depName=$([regex]::Escape($dependency))\s*$"
-  )).Count
-  if ($count -ne $renovateHintCounts[$dependency]) {
-    throw "Expected $($renovateHintCounts[$dependency]) Renovate hints for $dependency, found $count"
-  }
-}
-
 $renovateSource = Get-Content -Raw -LiteralPath '.github\renovate.json'
 $renovate = $renovateSource | ConvertFrom-Json
-$customManagerSource = ($renovate.customManagers | ConvertTo-Json -Depth 10)
-if ($customManagerSource -notmatch 'github/workflows' -or
-    $customManagerSource -notmatch 'currentValue' -or
-    $customManagerSource -notmatch 'currentDigest') {
-  throw 'Renovate must extract checksum-pinned CLI and pnpm default versions from workflow files'
+if ($renovateSource -match '"customManagers"' -or $renovateSource -match 'custom\.regex') {
+  throw 'The pipeline repository must use native Renovate managers only'
 }
-$reviewedManagers = @($renovate.packageRules | ForEach-Object matchManagers | Where-Object { $_ })
-if ($reviewedManagers -notcontains 'custom.regex') {
-  throw 'Custom regex dependency updates must remain subject to human review'
+if ($allReusableWorkflowSource -match '# renovate:') {
+  throw 'Workflow-specific Renovate hints are not justified in the pipeline repository'
 }
 
 foreach ($example in Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File) {

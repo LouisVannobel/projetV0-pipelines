@@ -15,7 +15,7 @@
   "packageRules": [
     {
       "description": "No dependency update bypasses human review during the experimental phase",
-      "matchManagers": ["github-actions", "dockerfile", "docker-compose", "npm", "custom.regex"],
+      "matchManagers": ["github-actions", "dockerfile", "docker-compose", "npm"],
       "automerge": false
     },
     {
@@ -24,37 +24,10 @@
       "labels": ["dependencies", "breaking-change"]
     },
     {
-      "description": "Group non-breaking CI tool updates",
-      "matchManagers": ["github-actions", "custom.regex"],
+      "description": "Group non-breaking GitHub Actions updates",
+      "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "github-actions"
-    }
-  ],
-  "customManagers": [
-    {
-      "description": "Track checksum-pinned CLI releases embedded in workflows",
-      "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
-      "matchStrings": [
-        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s+[a-z0-9_]+_version=(?<currentValue>v?\\d+\\.\\d+\\.\\d+)"
-      ]
-    },
-    {
-      "description": "Track the reusable SaaS pnpm default",
-      "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/reusable-saas-ci\\.yml$/"],
-      "matchStrings": [
-        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s+default:\\s+[\\\"]?(?<currentValue>\\d+\\.\\d+\\.\\d+)[\\\"]?"
-      ]
-    },
-    {
-      "description": "Track the BuildKit image used by the Buildx container driver",
-      "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
-      "matchStrings": [
-        "(?<indentation>[ \\t]*)# renovate: datasource=(?<datasource>docker) depName=(?<depName>moby/buildkit)\\s+driver-opts:\\s+image=moby/buildkit:(?<currentValue>v?\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[a-f0-9]{64})"
-      ],
-      "autoReplaceStringTemplate": "{{{indentation}}}# renovate: datasource=docker depName={{{depName}}}\n{{{indentation}}}driver-opts: image={{{depName}}}:{{{newValue}}}@{{{newDigest}}}"
     }
   ]
 }
