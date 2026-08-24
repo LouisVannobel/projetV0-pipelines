@@ -246,6 +246,21 @@ if ($containerReleaseCallerJob -match '(?m)^ {4}secrets:\s*(inherit\s*$|$)' -or 
   throw 'The production release caller must not pass Dokploy secrets to the reusable workflow'
 }
 
+$readme = Get-Content -Raw -LiteralPath 'README.md'
+foreach ($requiredDeploymentPrerequisite in @(
+  'sourceType: docker',
+  'identifiants de pull',
+  'GHCR privé',
+  'compte/API Dokploy dédié',
+  'permissions minimales',
+  'environnement GitHub `production`',
+  'protégé'
+)) {
+  if ($readme -notmatch [regex]::Escape($requiredDeploymentPrerequisite)) {
+    throw "README omits deployment prerequisite: $requiredDeploymentPrerequisite"
+  }
+}
+
 $actionlintExe = $env:ACTIONLINT_EXE
 if ($actionlintExe) {
   if (-not (Test-Path -LiteralPath $actionlintExe)) { throw "actionlint executable not found: $actionlintExe" }

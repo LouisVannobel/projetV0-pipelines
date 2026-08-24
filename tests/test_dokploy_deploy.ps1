@@ -80,7 +80,7 @@ endpoint="${url#${DOKPLOY_URL%/}}"
 
 if [[ "$endpoint" == /application.* || "$endpoint" == /deployment.* ]]; then
   expected_method=POST
-  [[ "$endpoint" == /deployment.all?applicationId=* ]] && expected_method=GET
+  [[ "$endpoint" == /deployment.all?applicationId=* || "$endpoint" == /application.one?applicationId=* ]] && expected_method=GET
   [[ "$method" == "$expected_method" ]] || {
     printf 'fake curl rejected API method\n' >&2
     exit 92
@@ -125,6 +125,36 @@ else
 fi
 
 case "$endpoint" in
+  /application.one?applicationId=*)
+    count_file="$FAKE_CURL_STATE/application-one-count"
+    count=0
+    [[ -f "$count_file" ]] && count="$(<"$count_file")"
+    count=$((count + 1))
+    printf '%s' "$count" > "$count_file"
+    printf 'application.one\n' >> "$FAKE_CURL_STATE/requests"
+    if [[ "$FAKE_CURL_SCENARIO" == preflight-exhausted || ("$FAKE_CURL_SCENARIO" == preflight-transient && "$count" -lt 3) ]]; then
+      printf 'APPLICATION_ONE_RESPONSE_SECRET'
+      printf 'APPLICATION_ONE_RESPONSE_SECRET' >&2
+      exit 22
+    fi
+    case "$FAKE_CURL_SCENARIO" in
+      git-source)
+        printf '{"sourceType":"git","dockerImage":"ghcr.io/example/saas@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","username":"APPLICATION_RESPONSE_SECRET"}\n200'
+        ;;
+      github-source)
+        printf '{"sourceType":"github","dockerImage":"ghcr.io/example/saas@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","username":"APPLICATION_RESPONSE_SECRET"}\n200'
+        ;;
+      missing-image)
+        printf '{"sourceType":"docker","username":"APPLICATION_RESPONSE_SECRET"}\n200'
+        ;;
+      malformed-image)
+        printf '{"sourceType":"docker","dockerImage":"bad image with spaces","username":"APPLICATION_RESPONSE_SECRET"}\n200'
+        ;;
+      *)
+        printf '{"sourceType":"docker","dockerImage":"ghcr.io/example/saas@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","username":"APPLICATION_RESPONSE_SECRET"}\n200'
+        ;;
+    esac
+    ;;
   /deployment.all?applicationId=*)
     count_file="$FAKE_CURL_STATE/deployment-count"
     count=0
@@ -132,75 +162,61 @@ case "$endpoint" in
     count=$((count + 1))
     printf '%s' "$count" > "$count_file"
     printf 'deployment.all\n' >> "$FAKE_CURL_STATE/requests"
-    case "$FAKE_CURL_SCENARIO:$count" in
-      success:1|unrelated-newer:1|new-error:1|cancelled:1|timeout:1|health-failure:1|redirect-301:1|redirect-302:1|old-revision:1|update-redirect-301:1|deploy-redirect-302:1)
-        printf '[{"deploymentId":"previous-deployment","title":"Previous release","status":"done","log":"API_RESPONSE_SECRET"}]'
-        ;;
-      prior-reuse:1)
-        printf '[{"deploymentId":"previous-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      success:2)
-        printf '[{"deploymentId":"previous-deployment","title":"Previous release","status":"done","log":"API_RESPONSE_SECRET"}]'
-        ;;
-      success:3)
-        printf '[{"deploymentId":"new-deployment","title":"%s","status":"running","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      success:*)
-        printf '[{"deploymentId":"new-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      unrelated-newer:2)
-        printf '[{"deploymentId":"manual-deployment","title":"Manual deployment","status":"done"},{"deploymentId":"new-deployment","title":"%s","status":"running","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      unrelated-newer:*)
-        printf '[{"deploymentId":"manual-deployment","title":"Manual deployment","status":"done"},{"deploymentId":"new-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      new-error:*)
-        printf '[{"deploymentId":"failed-deployment","title":"%s","status":"error","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      cancelled:*)
-        printf '[{"deploymentId":"cancelled-deployment","title":"%s","status":"cancelled","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      health-failure:*)
-        printf '[{"deploymentId":"new-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      redirect-301:*|redirect-302:*|old-revision:*|update-redirect-301:*|deploy-redirect-302:*)
-        printf '[{"deploymentId":"new-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      prior-reuse:*)
-        printf '[{"deploymentId":"previous-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      timeout:*)
-        printf '[{"deploymentId":"running-deployment","title":"%s","status":"running","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
-        ;;
-      *)
-        printf 'unexpected fixture' >&2
-        exit 90
-        ;;
-    esac
-    if [[ -n "$write_out" ]]; then
-      [[ "$write_out" == $'\n%{http_code}' ]] || {
-        printf 'fake curl rejected API response capture\n' >&2
-        exit 98
-      }
-      printf '\n200'
+    if [[ "$count" -eq 1 ]]; then
+      if [[ "$FAKE_CURL_SCENARIO" == prior-reuse ]]; then
+        printf '[{"deploymentId":"previous-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]\n200' "$FAKE_EXPECTED_TITLE"
+      else
+        printf '[{"deploymentId":"previous-deployment","title":"Previous release","status":"done","log":"API_RESPONSE_SECRET"}]\n200'
+      fi
+    else
+      case "$FAKE_CURL_SCENARIO:$count" in
+        success:2)
+          printf '[{"deploymentId":"previous-deployment","title":"Previous release","status":"done","log":"API_RESPONSE_SECRET"}]\n200'
+          ;;
+        success:3)
+          printf '[{"deploymentId":"new-deployment","title":"%s","status":"running","log":"API_RESPONSE_SECRET"}]\n200' "$FAKE_EXPECTED_TITLE"
+          ;;
+        unrelated-newer:2)
+          printf '[{"deploymentId":"manual-deployment","title":"Manual deployment","status":"done"},{"deploymentId":"new-deployment","title":"%s","status":"running","log":"API_RESPONSE_SECRET"}]\n200' "$FAKE_EXPECTED_TITLE"
+          ;;
+        unrelated-newer:*)
+          printf '[{"deploymentId":"manual-deployment","title":"Manual deployment","status":"done"},{"deploymentId":"new-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]\n200' "$FAKE_EXPECTED_TITLE"
+          ;;
+        new-error:*)
+          printf '[{"deploymentId":"failed-deployment","title":"%s","status":"error","log":"API_RESPONSE_SECRET"}]\n200' "$FAKE_EXPECTED_TITLE"
+          ;;
+        cancelled:*)
+          printf '[{"deploymentId":"cancelled-deployment","title":"%s","status":"cancelled","log":"API_RESPONSE_SECRET"}]\n200' "$FAKE_EXPECTED_TITLE"
+          ;;
+        prior-reuse:*)
+          printf '[{"deploymentId":"previous-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]\n200' "$FAKE_EXPECTED_TITLE"
+          ;;
+        timeout:*)
+          printf '[{"deploymentId":"running-deployment","title":"%s","status":"running","log":"API_RESPONSE_SECRET"}]\n200' "$FAKE_EXPECTED_TITLE"
+          ;;
+        *)
+          printf '[{"deploymentId":"new-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]\n200' "$FAKE_EXPECTED_TITLE"
+          ;;
+      esac
     fi
     ;;
   /application.update)
+    count_file="$FAKE_CURL_STATE/update-count"
+    count=0
+    [[ -f "$count_file" ]] && count="$(<"$count_file")"
+    count=$((count + 1))
+    printf '%s' "$count" > "$count_file"
     printf 'application.update %s\n' "$body" >> "$FAKE_CURL_STATE/requests"
     api_status=200
     api_detail=API_RESPONSE_SECRET
-    if [[ "$FAKE_CURL_SCENARIO" == update-redirect-301 ]]; then
+    if [[ "$FAKE_CURL_SCENARIO" == update-redirect-301 && "$count" -eq 1 ]]; then
       api_status=301
       api_detail=UPDATE_REDIRECT_RESPONSE_SECRET
+    elif [[ "$FAKE_CURL_SCENARIO" == recovery-failure && "$count" -gt 1 ]]; then
+      api_status=500
+      api_detail=RECOVERY_RESPONSE_SECRET
     fi
-    printf '{"ok":true,"detail":"%s"}' "$api_detail"
-    if [[ -n "$write_out" ]]; then
-      [[ "$write_out" == $'\n%{http_code}' ]] || {
-        printf 'fake curl rejected API response capture\n' >&2
-        exit 98
-      }
-      printf '\n%s' "$api_status"
-    fi
+    printf '{"ok":true,"detail":"%s"}\n%s' "$api_detail" "$api_status"
     ;;
   /application.deploy)
     printf 'application.deploy %s\n' "$body" >> "$FAKE_CURL_STATE/requests"
@@ -209,19 +225,20 @@ case "$endpoint" in
     if [[ "$FAKE_CURL_SCENARIO" == deploy-redirect-302 ]]; then
       api_status=302
       api_detail=DEPLOY_REDIRECT_RESPONSE_SECRET
+    elif [[ "$FAKE_CURL_SCENARIO" == deploy-post-failure || "$FAKE_CURL_SCENARIO" == recovery-failure ]]; then
+      api_status=500
+      api_detail=DEPLOY_FAILURE_RESPONSE_SECRET
     fi
-    printf '{"queued":true,"detail":"%s"}' "$api_detail"
-    if [[ -n "$write_out" ]]; then
-      [[ "$write_out" == $'\n%{http_code}' ]] || {
-        printf 'fake curl rejected API response capture\n' >&2
-        exit 98
-      }
-      printf '\n%s' "$api_status"
-    fi
+    printf '{"queued":true,"detail":"%s"}\n%s' "$api_detail" "$api_status"
     ;;
   *)
+    count_file="$FAKE_CURL_STATE/health-count"
+    count=0
+    [[ -f "$count_file" ]] && count="$(<"$count_file")"
+    count=$((count + 1))
+    printf '%s' "$count" > "$count_file"
     printf 'health\n' >> "$FAKE_CURL_STATE/requests"
-    if [[ "$FAKE_CURL_SCENARIO" == health-failure ]]; then
+    if [[ "$FAKE_CURL_SCENARIO" == health-failure || ("$FAKE_CURL_SCENARIO" == health-transient && "$count" -eq 1) ]]; then
       printf 'HEALTH_RESPONSE_SECRET'
       printf 'HEALTH_RESPONSE_SECRET' >&2
       exit 22
@@ -233,8 +250,18 @@ case "$endpoint" in
       redirect-302)
         printf '{"revision":"%s","detail":"HEALTH_RESPONSE_SECRET"}\n302' "$EXPECTED_REVISION"
         ;;
+      invalid-health-json)
+        printf 'not-json-HEALTH_RESPONSE_SECRET\n200'
+        ;;
       old-revision)
         printf '{"revision":"cccccccccccccccccccccccccccccccccccccccc","detail":"HEALTH_RESPONSE_SECRET"}\n200'
+        ;;
+      old-then-current)
+        if [[ "$count" -eq 1 ]]; then
+          printf '{"revision":"cccccccccccccccccccccccccccccccccccccccc","detail":"HEALTH_RESPONSE_SECRET"}\n200'
+        else
+          printf '{"revision":"%s","detail":"HEALTH_RESPONSE_SECRET"}\n200' "$EXPECTED_REVISION"
+        fi
         ;;
       *)
         printf '{"revision":"%s","detail":"HEALTH_RESPONSE_SECRET"}\n200' "$EXPECTED_REVISION"
@@ -280,11 +307,17 @@ function Invoke-DeployScenario {
     [string]$ReleaseRef = 'ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     [string]$HealthUrl = 'https://saas.example.test/health',
     [string]$DokployUrl = 'https://dokploy.internal.example/api',
-    [string]$ExpectedRevision = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    [string]$ExpectedRevision = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    [string]$PreflightMaxAttempts = '3',
+    [string]$PreflightRetrySeconds = '0',
+    [string]$HealthMaxAttempts = '3',
+    [string]$HealthRetrySeconds = '0'
   )
 
   Remove-Item -LiteralPath (Join-Path $stateDir 'requests') -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath (Join-Path $stateDir 'deployment-count') -Force -ErrorAction SilentlyContinue
+  foreach ($counter in @('application-one-count', 'deployment-count', 'health-count', 'update-count')) {
+    Remove-Item -LiteralPath (Join-Path $stateDir $counter) -Force -ErrorAction SilentlyContinue
+  }
 
   $saved = @{}
   $values = @{
@@ -297,13 +330,17 @@ function Invoke-DeployScenario {
     GITHUB_RUN_ID = '123456'
     GITHUB_RUN_ATTEMPT = '2'
     EXPECTED_REVISION = $ExpectedRevision
+    DOKPLOY_PREFLIGHT_MAX_ATTEMPTS = $PreflightMaxAttempts
+    DOKPLOY_PREFLIGHT_RETRY_SECONDS = $PreflightRetrySeconds
     DOKPLOY_DEPLOY_MAX_POLLS = '3'
     DOKPLOY_DEPLOY_POLL_SECONDS = '0'
+    DOKPLOY_HEALTH_MAX_ATTEMPTS = $HealthMaxAttempts
+    DOKPLOY_HEALTH_RETRY_SECONDS = $HealthRetrySeconds
     FAKE_CURL_SCENARIO = $Scenario
     FAKE_CURL_STATE = $bashStateDir
     FAKE_EXPECTED_TITLE = 'github:example/saas:123456:2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     BASH_ENV = $bashBashEnvPath
-    WSLENV = 'DOKPLOY_URL:DOKPLOY_API_KEY:DOKPLOY_APPLICATION_ID:RELEASE_REF:HEALTH_URL:GITHUB_REPOSITORY:GITHUB_RUN_ID:GITHUB_RUN_ATTEMPT:EXPECTED_REVISION:DOKPLOY_DEPLOY_MAX_POLLS:DOKPLOY_DEPLOY_POLL_SECONDS:FAKE_CURL_SCENARIO:FAKE_CURL_STATE:FAKE_EXPECTED_TITLE:BASH_ENV'
+    WSLENV = 'DOKPLOY_URL:DOKPLOY_API_KEY:DOKPLOY_APPLICATION_ID:RELEASE_REF:HEALTH_URL:GITHUB_REPOSITORY:GITHUB_RUN_ID:GITHUB_RUN_ATTEMPT:EXPECTED_REVISION:DOKPLOY_PREFLIGHT_MAX_ATTEMPTS:DOKPLOY_PREFLIGHT_RETRY_SECONDS:DOKPLOY_DEPLOY_MAX_POLLS:DOKPLOY_DEPLOY_POLL_SECONDS:DOKPLOY_HEALTH_MAX_ATTEMPTS:DOKPLOY_HEALTH_RETRY_SECONDS:FAKE_CURL_SCENARIO:FAKE_CURL_STATE:FAKE_EXPECTED_TITLE:BASH_ENV'
   }
   foreach ($name in $values.Keys) {
     $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -332,6 +369,10 @@ function Invoke-DeployScenario {
 }
 
 try {
+  $newUpdate = 'application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+  $restoreUpdate = 'application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}'
+  $deployRequest = 'application.deploy {"applicationId":"app_123-ABC","title":"github:example/saas:123456:2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+
   $invalid = Invoke-DeployScenario -Scenario success -ReleaseRef 'ghcr.io/example/saas:latest'
   Assert-True ($invalid.ExitCode -ne 0) 'Malformed digest must fail'
   Assert-True ($invalid.Requests.Count -eq 0) 'Malformed digest must fail before any API call'
@@ -352,75 +393,99 @@ try {
   Assert-True ($healthFragment.ExitCode -ne 0) 'Health URL fragment must fail'
   Assert-True ($healthFragment.Requests.Count -eq 0) 'Health URL fragment must fail before any API call'
 
-  $healthQuery = Invoke-DeployScenario -Scenario success -HealthUrl 'https://saas.example.test/health?ready=1'
-  Assert-True ($healthQuery.ExitCode -eq 0) 'Health URL query must remain supported'
-
   $missingRevision = Invoke-DeployScenario -Scenario success -ExpectedRevision ''
   Assert-True ($missingRevision.ExitCode -ne 0) 'Missing expected revision must fail'
   Assert-True ($missingRevision.Requests.Count -eq 0) 'Missing expected revision must fail before any API call'
 
+  foreach ($invalidBound in @(
+    (Invoke-DeployScenario -Scenario success -PreflightMaxAttempts '0'),
+    (Invoke-DeployScenario -Scenario success -PreflightRetrySeconds '-1'),
+    (Invoke-DeployScenario -Scenario success -HealthMaxAttempts '0'),
+    (Invoke-DeployScenario -Scenario success -HealthRetrySeconds '-1')
+  )) {
+    Assert-True ($invalidBound.ExitCode -ne 0) 'Invalid retry/poll bound must fail'
+    Assert-True ($invalidBound.Requests.Count -eq 0) 'Invalid retry/poll bound must fail before any request'
+  }
+
+  foreach ($invalidApplication in @('git-source', 'github-source', 'missing-image', 'malformed-image')) {
+    $preflightReject = Invoke-DeployScenario -Scenario $invalidApplication
+    Assert-True ($preflightReject.ExitCode -ne 0) "Invalid Docker application contract '$invalidApplication' must fail"
+    Assert-True (($preflightReject.Requests -join ',') -eq 'application.one') "Invalid application '$invalidApplication' must cause zero POSTs"
+    Assert-True ($preflightReject.Output -notmatch 'APPLICATION_RESPONSE_SECRET|dddddddd|DOKPLOY_API_KEY_SECRET') "Application preflight '$invalidApplication' leaked its body or API key"
+  }
+
+  $preflightTransient = Invoke-DeployScenario -Scenario preflight-transient
+  Assert-True ($preflightTransient.ExitCode -eq 0) "Transient application preflight did not recover: $($preflightTransient.Output)"
+  Assert-True (($preflightTransient.Requests | Select-Object -First 3) -join ',' -eq 'application.one,application.one,application.one') 'Only the initial application.one GET may be retried'
+  Assert-True ($preflightTransient.Output -notmatch 'APPLICATION_ONE_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Transient preflight leaked its response or API key'
+
+  $preflightExhausted = Invoke-DeployScenario -Scenario preflight-exhausted
+  Assert-True ($preflightExhausted.ExitCode -ne 0) 'Exhausted application preflight retries must fail'
+  Assert-True (($preflightExhausted.Requests -join ',') -eq 'application.one,application.one,application.one') 'Exhausted application preflight must cause zero mutations'
+  Assert-True ($preflightExhausted.Output -notmatch 'APPLICATION_ONE_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Exhausted preflight leaked its response or API key'
+
+  $healthQuery = Invoke-DeployScenario -Scenario success -HealthUrl 'https://saas.example.test/health?ready=1'
+  Assert-True ($healthQuery.ExitCode -eq 0) 'Health URL query must remain supported'
+
   $success = Invoke-DeployScenario -Scenario success
   Assert-True ($success.ExitCode -eq 0) "Successful deployment failed: $($success.Output)"
-  Assert-True (($success.Requests -join ',') -eq 'deployment.all,application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},application.deploy {"applicationId":"app_123-ABC","title":"github:example/saas:123456:2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},deployment.all,deployment.all,deployment.all,health') 'Deployment requests were not issued in snapshot/update/deploy/poll/health order'
-  Assert-True ($success.Requests[1] -notmatch 'username|password|registry') 'Application update must not resend registry credentials'
-  Assert-True (($success.Requests -join ',') -notmatch 'DOKPLOY_API_KEY_SECRET') 'Fake curl request log must not contain the API key'
+  Assert-True (($success.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, 'deployment.all', 'deployment.all', 'deployment.all', 'health') -join ',')) 'Deployment requests were not issued in preflight/snapshot/update/deploy/poll/health order'
+  Assert-True (@($success.Requests | Where-Object { $_ -like 'application.update *' }).Count -eq 1) 'Successful deployment must not restore the prior image'
+  Assert-True (($success.Requests -join ',') -notmatch 'username|password|registry|DOKPLOY_API_KEY_SECRET') 'Success request trace leaked credentials'
   Assert-True ($success.Output -eq 'DOKPLOY_DEPLOY_OK application=app_123-ABC image=ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') 'Success output must be exact and minimal'
-  Assert-True ($success.Output -notmatch 'DOKPLOY_API_KEY_SECRET|API_RESPONSE_SECRET|HEALTH_RESPONSE_SECRET|private response') 'Success output leaked a secret or response body'
+  Assert-True ($success.Output -notmatch 'DOKPLOY_API_KEY_SECRET|API_RESPONSE_SECRET|APPLICATION_RESPONSE_SECRET|HEALTH_RESPONSE_SECRET') 'Success output leaked a secret or response body'
 
   $unrelatedNewer = Invoke-DeployScenario -Scenario unrelated-newer
   Assert-True ($unrelatedNewer.ExitCode -eq 0) "Unrelated newer deployment disrupted correlation: $($unrelatedNewer.Output)"
-  Assert-True (($unrelatedNewer.Requests -join ',') -eq 'deployment.all,application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},application.deploy {"applicationId":"app_123-ABC","title":"github:example/saas:123456:2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},deployment.all,deployment.all,health') 'An unrelated newer done deployment must not satisfy the correlated poll'
+  Assert-True (($unrelatedNewer.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, 'deployment.all', 'deployment.all', 'health') -join ',')) 'An unrelated newer done deployment must not satisfy the correlated poll'
 
   $updateRedirect = Invoke-DeployScenario -Scenario update-redirect-301
   Assert-True ($updateRedirect.ExitCode -ne 0) 'Application update HTTP 301 must fail'
-  Assert-True (($updateRedirect.Requests -join ',') -eq 'deployment.all,application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}') 'Application update redirect must stop before deploy, poll, or health'
-  Assert-True ($updateRedirect.Output -match 'exact HTTP 200') 'Application update redirect must report an exact-200 failure'
+  Assert-True (($updateRedirect.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate) -join ',')) 'Initial update failure must not deploy or restore'
   Assert-True ($updateRedirect.Output -notmatch 'UPDATE_REDIRECT_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Application update redirect leaked its body or API key'
 
-  $deployRedirect = Invoke-DeployScenario -Scenario deploy-redirect-302
-  Assert-True ($deployRedirect.ExitCode -ne 0) 'Application deploy HTTP 302 must fail'
-  Assert-True (($deployRedirect.Requests -join ',') -eq 'deployment.all,application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},application.deploy {"applicationId":"app_123-ABC","title":"github:example/saas:123456:2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}') 'Application deploy redirect must stop before poll or health'
-  Assert-True ($deployRedirect.Output -match 'exact HTTP 200') 'Application deploy redirect must report an exact-200 failure'
-  Assert-True ($deployRedirect.Output -notmatch 'DEPLOY_REDIRECT_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Application deploy redirect leaked its body or API key'
-
-  $priorReuse = Invoke-DeployScenario -Scenario prior-reuse
-  Assert-True ($priorReuse.ExitCode -ne 0) 'Prior deployment record must not be accepted as the queued deployment'
-  Assert-True ($priorReuse.Output -match 'Timed out') 'Prior deployment reuse must end in an explicit timeout'
-  Assert-True ($priorReuse.Requests[-1] -ne 'health') 'Health must not run when no new deployment record appears'
-
-  $newError = Invoke-DeployScenario -Scenario new-error
-  Assert-True ($newError.ExitCode -ne 0) 'A new errored deployment must fail'
-  Assert-True ($newError.Output -match 'failed with status error') 'Errored deployment must report only its status'
-  Assert-True ($newError.Output -notmatch 'API_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Errored deployment leaked a secret or API response'
-  Assert-True ($newError.Requests[-1] -ne 'health') 'Health must not run after a deployment error'
-
-  $cancelled = Invoke-DeployScenario -Scenario cancelled
-  Assert-True ($cancelled.ExitCode -ne 0) 'A new cancelled deployment must fail'
-  Assert-True ($cancelled.Output -match 'failed with status cancelled') 'Cancelled deployment must report only its status'
-  Assert-True ($cancelled.Output -notmatch 'API_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Cancelled deployment leaked a secret or API response'
-  Assert-True ($cancelled.Requests[-1] -ne 'health') 'Health must not run after a cancelled deployment'
-
-  $timeout = Invoke-DeployScenario -Scenario timeout
-  Assert-True ($timeout.ExitCode -ne 0) 'Deployment polling timeout must fail'
-  Assert-True ($timeout.Output -match 'Timed out') 'Deployment timeout must be explicit'
-  Assert-True ($timeout.Output -notmatch 'API_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Timeout output leaked a secret or API response'
-
-  $healthFailure = Invoke-DeployScenario -Scenario health-failure
-  Assert-True ($healthFailure.ExitCode -ne 0) 'External health failure must fail the deployment boundary'
-  Assert-True ($healthFailure.Output -match 'External health check failed') 'Health failure must be explicit'
-  Assert-True ($healthFailure.Output -notmatch 'HEALTH_RESPONSE_SECRET|API_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Health failure leaked a secret or response body'
-
-  foreach ($redirectStatus in @(301, 302)) {
-    $redirect = Invoke-DeployScenario -Scenario "redirect-$redirectStatus"
-    Assert-True ($redirect.ExitCode -ne 0) "Health redirect $redirectStatus must fail"
-    Assert-True ($redirect.Output -match 'exact HTTP 200') "Health redirect $redirectStatus must report an exact-200 failure"
-    Assert-True ($redirect.Output -notmatch 'HEALTH_RESPONSE_SECRET|API_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') "Health redirect $redirectStatus leaked a secret or response body"
+  foreach ($deployFailureScenario in @('deploy-redirect-302', 'deploy-post-failure')) {
+    $deployFailure = Invoke-DeployScenario -Scenario $deployFailureScenario
+    Assert-True ($deployFailure.ExitCode -ne 0) "Deploy failure '$deployFailureScenario' must fail"
+    Assert-True (($deployFailure.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, $restoreUpdate) -join ',')) "Deploy failure '$deployFailureScenario' must restore once without poll/health"
+    Assert-True ($deployFailure.Output -notmatch 'DEPLOY_REDIRECT_RESPONSE_SECRET|DEPLOY_FAILURE_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') "Deploy failure '$deployFailureScenario' leaked its body or API key"
   }
 
-  $oldRevision = Invoke-DeployScenario -Scenario old-revision
-  Assert-True ($oldRevision.ExitCode -ne 0) 'A healthy rollback revision must fail'
-  Assert-True ($oldRevision.Output -match 'revision mismatch') 'Rollback false-success must report a revision mismatch'
-  Assert-True ($oldRevision.Output -notmatch 'HEALTH_RESPONSE_SECRET|cccccccc|DOKPLOY_API_KEY_SECRET') 'Revision mismatch leaked the health body or a secret'
+  foreach ($terminalFailure in @(
+    @{ Scenario = 'new-error'; Message = 'failed with status error' },
+    @{ Scenario = 'cancelled'; Message = 'failed with status cancelled' },
+    @{ Scenario = 'prior-reuse'; Message = 'Timed out' },
+    @{ Scenario = 'timeout'; Message = 'Timed out' }
+  )) {
+    $failed = Invoke-DeployScenario -Scenario $terminalFailure.Scenario
+    Assert-True ($failed.ExitCode -ne 0) "Deployment failure '$($terminalFailure.Scenario)' must fail"
+    Assert-True ($failed.Output -match [regex]::Escape($terminalFailure.Message)) "Deployment failure '$($terminalFailure.Scenario)' lost its original status"
+    Assert-True ($failed.Requests[-1] -eq $restoreUpdate) "Deployment failure '$($terminalFailure.Scenario)' must restore the prior image"
+    Assert-True (@($failed.Requests | Where-Object { $_ -like 'application.deploy *' }).Count -eq 1) "Deployment failure '$($terminalFailure.Scenario)' must not retry deploy POST"
+  }
+
+  foreach ($healthFailureScenario in @('health-failure', 'redirect-301', 'redirect-302', 'invalid-health-json', 'old-revision')) {
+    $healthFailed = Invoke-DeployScenario -Scenario $healthFailureScenario
+    Assert-True ($healthFailed.ExitCode -ne 0) "Health convergence '$healthFailureScenario' must exhaust and fail"
+    Assert-True ($healthFailed.Output -match 'did not converge') "Health convergence '$healthFailureScenario' must report exhaustion"
+    Assert-True (@($healthFailed.Requests | Where-Object { $_ -eq 'health' }).Count -eq 3) "Health convergence '$healthFailureScenario' must use the configured attempt bound"
+    Assert-True ($healthFailed.Requests[-1] -eq $restoreUpdate) "Health convergence '$healthFailureScenario' must restore the prior image"
+    Assert-True ($healthFailed.Output -notmatch 'HEALTH_RESPONSE_SECRET|cccccccc|DOKPLOY_API_KEY_SECRET') "Health convergence '$healthFailureScenario' leaked a body or key"
+  }
+
+  foreach ($healthRecoveryScenario in @('old-then-current', 'health-transient')) {
+    $healthRecovered = Invoke-DeployScenario -Scenario $healthRecoveryScenario
+    Assert-True ($healthRecovered.ExitCode -eq 0) "Health convergence '$healthRecoveryScenario' did not recover"
+    Assert-True (@($healthRecovered.Requests | Where-Object { $_ -eq 'health' }).Count -eq 2) "Health convergence '$healthRecoveryScenario' must stop on the matching revision"
+    Assert-True (@($healthRecovered.Requests | Where-Object { $_ -like 'application.update *' }).Count -eq 1) "Health convergence '$healthRecoveryScenario' must not restore after success"
+  }
+
+  $recoveryFailure = Invoke-DeployScenario -Scenario recovery-failure
+  Assert-True ($recoveryFailure.ExitCode -ne 0) 'Failed recovery must preserve failure'
+  Assert-True ($recoveryFailure.Output -match 'application.deploy') 'Failed recovery must retain the original deploy failure'
+  Assert-True ($recoveryFailure.Output -match 'Desired-image recovery failed') 'Failed recovery must be explicit'
+  Assert-True ($recoveryFailure.Output -notmatch 'RECOVERY_RESPONSE_SECRET|DEPLOY_FAILURE_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Failed recovery leaked a response or key'
+  Assert-True (($recoveryFailure.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, $restoreUpdate) -join ',')) 'Recovery failure must attempt restore exactly once'
 
   Write-Output 'DOKPLOY_DEPLOY_TESTS_OK'
 } finally {

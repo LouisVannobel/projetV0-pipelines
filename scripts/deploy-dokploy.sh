@@ -67,10 +67,18 @@ validate_https_url "$HEALTH_URL" health || fail 'HEALTH_URL must have a valid HT
 [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || fail 'GITHUB_RUN_ATTEMPT must be a positive integer'
 [[ "$EXPECTED_REVISION" =~ ^[a-f0-9]{40}$ ]] || fail 'EXPECTED_REVISION must be a full lowercase Git commit SHA'
 
+preflight_max_attempts="${DOKPLOY_PREFLIGHT_MAX_ATTEMPTS:-5}"
+preflight_retry_seconds="${DOKPLOY_PREFLIGHT_RETRY_SECONDS:-2}"
 max_polls="${DOKPLOY_DEPLOY_MAX_POLLS:-120}"
 poll_seconds="${DOKPLOY_DEPLOY_POLL_SECONDS:-5}"
+health_max_attempts="${DOKPLOY_HEALTH_MAX_ATTEMPTS:-12}"
+health_retry_seconds="${DOKPLOY_HEALTH_RETRY_SECONDS:-5}"
+[[ "$preflight_max_attempts" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_PREFLIGHT_MAX_ATTEMPTS must be a positive integer'
+[[ "$preflight_retry_seconds" =~ ^[0-9]+$ ]] || fail 'DOKPLOY_PREFLIGHT_RETRY_SECONDS must be a non-negative integer'
 [[ "$max_polls" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_DEPLOY_MAX_POLLS must be a positive integer'
 [[ "$poll_seconds" =~ ^[0-9]+$ ]] || fail 'DOKPLOY_DEPLOY_POLL_SECONDS must be a non-negative integer'
+[[ "$health_max_attempts" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_HEALTH_MAX_ATTEMPTS must be a positive integer'
+[[ "$health_retry_seconds" =~ ^[0-9]+$ ]] || fail 'DOKPLOY_HEALTH_RETRY_SECONDS must be a non-negative integer'
 
 dokploy_url="${DOKPLOY_URL%/}"
 release_digest="${RELEASE_REF##*@}"
@@ -107,6 +115,63 @@ api_request() {
     return 1
   fi
   printf '%s' "$response"
+}
+
+parse_application_contract() {
+  local application="$1"
+  local prior_image
+  if ! prior_image="$(python3 -c '
+import json
+import re
+import sys
+
+value = json.load(sys.stdin)
+if not isinstance(value, dict) or value.get("sourceType") != "docker":
+    raise ValueError("application is not Docker-backed")
+image = value.get("dockerImage")
+pattern = re.compile(
+    r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?"
+    r"(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)+"
+    r"(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}|@sha256:[a-f0-9]{64})?$"
+)
+if not isinstance(image, str) or not pattern.fullmatch(image):
+    raise ValueError("application Docker image is missing or unsafe")
+print(image)
+' <<< "$application" 2>/dev/null)"; then
+    fail 'Dokploy application must use Docker source with a safe existing image'
+  fi
+  printf '%s' "$prior_image"
+}
+
+application_update_body() {
+  local image="$1"
+  python3 -c '
+import json
+import sys
+
+print(json.dumps(
+    {"applicationId": sys.argv[1], "dockerImage": sys.argv[2]},
+    separators=(",", ":"),
+))
+' "$DOKPLOY_APPLICATION_ID" "$image"
+}
+
+recovery_armed=false
+recovery_running=false
+restore_update_body=''
+recover_desired_image() {
+  local original_status=$?
+  trap - EXIT
+  if [[ "$original_status" -eq 0 || "$recovery_armed" != true || "$recovery_running" == true ]]; then
+    exit "$original_status"
+  fi
+
+  recovery_running=true
+  recovery_armed=false
+  if ! api_request POST '/application.update' "$restore_update_body" >/dev/null; then
+    printf 'Desired-image recovery failed\n' >&2
+  fi
+  exit "$original_status"
 }
 
 newest_deployment() {
@@ -167,6 +232,57 @@ else:
   printf '%s' "$parsed"
 }
 
+health_matches_expected_revision() {
+  local actual_revision
+  local health_body
+  local health_exchange
+  local health_status
+  if ! health_exchange="$(curl \
+    --silent \
+    --show-error \
+    --request GET \
+    --connect-timeout 5 \
+    --max-time 20 \
+    --max-redirs 0 \
+    --write-out $'\n%{http_code}' \
+    "$HEALTH_URL" 2>/dev/null)"; then
+    return 1
+  fi
+
+  health_status="${health_exchange##*$'\n'}"
+  health_body="${health_exchange%$'\n'*}"
+  [[ "$health_status" == 200 ]] || return 1
+  if ! actual_revision="$(python3 -c '
+import json
+import sys
+
+value = json.load(sys.stdin)
+if not isinstance(value, dict) or not isinstance(value.get("revision"), str):
+    raise ValueError("health response has no revision")
+print(value["revision"])
+' <<< "$health_body" 2>/dev/null)"; then
+    return 1
+  fi
+  [[ "$actual_revision" == "$EXPECTED_REVISION" ]]
+}
+
+application_response=''
+preflight_ok=false
+for ((attempt = 1; attempt <= preflight_max_attempts; attempt++)); do
+  if application_response="$(api_request GET "/application.one?applicationId=${DOKPLOY_APPLICATION_ID}")"; then
+    preflight_ok=true
+    break
+  fi
+  if ((attempt < preflight_max_attempts)); then
+    sleep "$preflight_retry_seconds"
+  fi
+done
+[[ "$preflight_ok" == true ]] || fail 'Dokploy application preflight retries exhausted'
+
+prior_image="$(parse_application_contract "$application_response")"
+desired_update_body="$(application_update_body "$RELEASE_REF")"
+restore_update_body="$(application_update_body "$prior_image")"
+
 deployments="$(api_request GET "/deployment.all?applicationId=${DOKPLOY_APPLICATION_ID}")" || exit 1
 previous="$(newest_deployment "$deployments")"
 previous_id=''
@@ -174,8 +290,9 @@ if [[ "$previous" != '__NONE__' ]]; then
   IFS=$'\t' read -r previous_id _ <<< "$previous"
 fi
 
-update_body="{\"applicationId\":\"${DOKPLOY_APPLICATION_ID}\",\"dockerImage\":\"${RELEASE_REF}\"}"
-api_request POST '/application.update' "$update_body" >/dev/null || exit 1
+trap recover_desired_image EXIT
+api_request POST '/application.update' "$desired_update_body" >/dev/null || exit 1
+recovery_armed=true
 
 deploy_body="{\"applicationId\":\"${DOKPLOY_APPLICATION_ID}\",\"title\":\"${deployment_title}\"}"
 api_request POST '/application.deploy' "$deploy_body" >/dev/null || exit 1
@@ -203,32 +320,18 @@ done
 
 [[ "$deployment_done" == true ]] || fail 'Timed out waiting for a new Dokploy deployment'
 
-if ! health_exchange="$(curl \
-  --silent \
-  --show-error \
-  --request GET \
-  --connect-timeout 5 \
-  --max-time 20 \
-  --max-redirs 0 \
-  --write-out $'\n%{http_code}' \
-  "$HEALTH_URL" 2>/dev/null)"; then
-  fail 'External health check failed'
-fi
+health_converged=false
+for ((attempt = 1; attempt <= health_max_attempts; attempt++)); do
+  if health_matches_expected_revision; then
+    health_converged=true
+    break
+  fi
+  if ((attempt < health_max_attempts)); then
+    sleep "$health_retry_seconds"
+  fi
+done
+[[ "$health_converged" == true ]] || fail 'External health did not converge to expected revision'
 
-health_status="${health_exchange##*$'\n'}"
-health_body="${health_exchange%$'\n'*}"
-[[ "$health_status" == 200 ]] || fail 'External health check did not return exact HTTP 200'
-if ! actual_revision="$(python3 -c '
-import json
-import sys
-
-value = json.load(sys.stdin)
-if not isinstance(value, dict) or not isinstance(value.get("revision"), str):
-    raise ValueError("health response has no revision")
-print(value["revision"])
-' <<< "$health_body" 2>/dev/null)"; then
-  fail 'External health response is invalid'
-fi
-[[ "$actual_revision" == "$EXPECTED_REVISION" ]] || fail 'External health revision mismatch'
-
+recovery_armed=false
+trap - EXIT
 printf 'DOKPLOY_DEPLOY_OK application=%s image=%s\n' "$DOKPLOY_APPLICATION_ID" "$RELEASE_REF"

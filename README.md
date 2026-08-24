@@ -16,7 +16,9 @@ Le push sur `main` construit une seule image GHCR, scanne ce digest immuable, pu
 
 Configurer les variables du dépôt `DOKPLOY_APPLICATION_ID`, `DOKPLOY_URL`, `HEALTH_URL`, `TS_WIF_CLIENT_ID` et `TS_WIF_AUDIENCE`, ainsi que `DOKPLOY_API_KEY` comme secret de l'environnement `production`. Aucun secret Dokploy n'est transmis par le caller.
 
-`HEALTH_URL` doit répondre sans redirection par HTTP 200 exact avec un JSON dont `revision` est le SHA déployé. Le workflow produit une provenance et un SBOM OCI, sans revendiquer de conformité SLSA formelle.
+L'application Dokploy doit utiliser la source Docker (`sourceType: docker`) et les identifiants de pull du registre GHCR privé doivent être configurés directement dans Dokploy. Utiliser un compte/API Dokploy dédié à cette application, limité à ce service et aux permissions minimales `service:read/create` et `deployment:read/create`. L'environnement GitHub `production` doit être protégé par les règles d'approbation adaptées au studio.
+
+`HEALTH_URL` doit converger sans redirection vers un HTTP 200 exact avec un JSON dont `revision` est le SHA déployé. Le workflow produit une provenance et un SBOM OCI, sans revendiquer de conformité SLSA formelle.
 
 ## Appel depuis un dépôt d'infrastructure
 
