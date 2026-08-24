@@ -196,6 +196,8 @@ $releaseJob = [regex]::Match($containerRelease, '(?ms)^  release:\s*$.*?(?=^  [A
 foreach ($requiredDeployControl in @(
   'environment: production',
   'id-token: write',
+  'group: container-release-${{ github.repository }}-${{ vars.DOKPLOY_APPLICATION_ID }}',
+  'cancel-in-progress: false',
   'tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3',
   'oauth-client-id: ${{ vars.TS_WIF_CLIENT_ID }}',
   'audience: ${{ vars.TS_WIF_AUDIENCE }}',
@@ -206,7 +208,9 @@ foreach ($requiredDeployControl in @(
   'DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}',
   'HEALTH_URL: ${{ vars.HEALTH_URL }}',
   'DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}',
+  'EXPECTED_REVISION: ${{ github.sha }}',
   'RELEASE_REF: ${{ env.RELEASE_REF }}',
+  'APP_REVISION=${{ github.sha }}',
   'bash .pipeline-runtime/scripts/deploy-dokploy.sh'
 )) {
   if ($releaseJob -notmatch [regex]::Escape($requiredDeployControl)) {

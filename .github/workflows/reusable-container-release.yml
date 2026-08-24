@@ -26,6 +26,9 @@ jobs:
       id-token: write
       packages: write
     environment: production
+    concurrency:
+      group: container-release-${{ github.repository }}-${{ vars.DOKPLOY_APPLICATION_ID }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -61,6 +64,8 @@ jobs:
           platforms: ${{ inputs.platforms }}
           push: true
           tags: ${{ steps.release-image.outputs.image }}:sha-${{ github.sha }}
+          build-args: |
+            APP_REVISION=${{ github.sha }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -111,6 +116,7 @@ jobs:
           DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          EXPECTED_REVISION: ${{ github.sha }}
           HEALTH_URL: ${{ vars.HEALTH_URL }}
           RELEASE_REF: ${{ env.RELEASE_REF }}
         run: bash .pipeline-runtime/scripts/deploy-dokploy.sh
