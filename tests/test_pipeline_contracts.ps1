@@ -75,6 +75,12 @@ $selfValidation = Get-Content -Raw -LiteralPath '.github\workflows\validate-pipe
 if ($selfValidation -notmatch [regex]::Escape('pwsh -File tests/test_pipeline_contracts.ps1')) {
   throw 'The pipeline repository must run its contract tests in GitHub Actions'
 }
+$pipelineContractsJob = [regex]::Match($selfValidation, '(?ms)^  validate:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)')
+if (-not $pipelineContractsJob.Success) { throw 'The pipeline validation workflow must contain the contracts job' }
+$pipelineContractsCheckout = [regex]::Match($pipelineContractsJob.Value, '(?ms)^\s*-\s+name:\s+Checkout without persisted credentials\s*$.*?(?=^\s*-\s+name:|\z)')
+if ($pipelineContractsCheckout.Value -notmatch '(?m)^\s+fetch-depth:\s*0\s*$') {
+  throw 'The checkout running pipeline contracts must fetch full history for pinned-workflow interface validation'
+}
 if ($selfValidation -notmatch [regex]::Escape('uses: ./.github/workflows/reusable-repository-ci.yml')) {
   throw 'The pipeline repository must execute its reusable repository CI locally before consumers depend on it'
 }
