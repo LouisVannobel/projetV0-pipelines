@@ -25,3 +25,11 @@ L'application Dokploy doit utiliser la source Docker (`sourceType: docker`) et l
 Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Le caller active le contrôle générique du dépôt puis, avec `run-infrastructure-static: true`, la syntaxe Bash, les erreurs ShellCheck, les tests de contrat locaux, les modèles Compose sans secrets et le contrat des locks d'images. Aucun accès SSH, secret de déploiement ou balayage anonyme de registre n'est utilisé.
 
 Le workflow transverse reste épinglé à son interface immuable documentée dans `examples/repository-ci.yml`.
+
+## Release OCI transverse pour Voice
+
+Le contrat Voice est séparé du chemin SaaS/Dokploy existant. `reusable-oci-release.yml` construit une seule fois une image `linux/amd64`, scanne son digest racine, vérifie ses attestations puis promeut ce même digest. Il ne publie pas `latest` et ne déploie rien.
+
+Copier `examples/oci-release.yml` dans le dépôt appelant. L'exemple est épinglé au commit immuable revu `f9227d74e2588fea69b91a68cc8aaac920397057`; le commentaire `v1.2.0` réserve le futur repère lisible, qui ne doit être créé qu'après CI de PR, smoke GHCR, revue indépendante et merge. Le tag SaaS/Dokploy `v1.1.0` reste inchangé et ne doit jamais être déplacé.
+
+Le workflow expose `image-digest`, `image-reference` et `sbom-artifact`. Le déploiement consomme exclusivement `image-reference` (`image@sha256:...`). Les tags de version et de révision peuvent être résolus pour fournir une preuve, mais ne sont jamais une entrée de déploiement.
