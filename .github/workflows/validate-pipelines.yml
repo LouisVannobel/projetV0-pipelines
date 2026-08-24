@@ -36,7 +36,9 @@ jobs:
             '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8' \
             "$RUNNER_TEMP/$archive" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint" .github/workflows/*.yml examples/*.yml
+          # actionlint 1.7.12 does not yet parse GitHub's exact-ref $/ self-action syntax.
+          self_action_ignore='^specifying action "\$/\.github/actions/deploy-dokploy" in invalid format because ref is missing\. available formats are "\{owner\}/\{repo\}@\{ref\}" or "\{owner\}/\{repo\}/\{path\}@\{ref\}"$'
+          "$RUNNER_TEMP/actionlint" -ignore "$self_action_ignore" .github/workflows/*.yml examples/*.yml
       - name: Scan repository for secrets
         shell: bash
         run: |

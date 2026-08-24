@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
-$shellEol = (& git check-attr eol -- scripts/deploy-dokploy.sh) -join "`n"
-if ($LASTEXITCODE -ne 0 -or $shellEol -notmatch '(?m)^scripts/deploy-dokploy\.sh: eol: lf$') {
+$deployActionScriptPath = '.github/actions/deploy-dokploy/deploy-dokploy.sh'
+$shellEol = (& git check-attr eol -- $deployActionScriptPath) -join "`n"
+if ($LASTEXITCODE -ne 0 -or $shellEol -notmatch '(?m)^\.github/actions/deploy-dokploy/deploy-dokploy\.sh: eol: lf$') {
   throw 'Shell entrypoints must stay LF in fresh Windows checkouts'
 }
 
@@ -51,7 +52,7 @@ foreach ($path in $workflows) {
   if ($workflow -notmatch '(?m)^\s*workflow_call:\s*$') { throw "$path is not callable" }
   foreach ($match in [regex]::Matches($workflow, '(?m)^\s*-?\s*uses:\s*(?<use>[^\s#]+)(?<comment>\s+#\s+v\d+\.\d+\.\d+)?\s*$')) {
     $use = $match.Groups['use'].Value
-    if ($use.StartsWith('./')) { continue }
+    if ($use.StartsWith('./') -or $use.StartsWith('$/')) { continue }
     if ($use -notmatch '@[0-9a-f]{40}$') { throw "Action is not pinned to a full commit SHA: $use" }
     if (-not $match.Groups['comment'].Success) { throw "Action pin has no Renovate-compatible version comment: $use" }
   }
@@ -122,6 +123,12 @@ if ($pipelineContractsCheckout.Value -notmatch '(?m)^\s+fetch-depth:\s*0\s*$') {
 }
 if ($selfValidation -notmatch [regex]::Escape('uses: ./.github/workflows/reusable-repository-ci.yml')) {
   throw 'The pipeline repository must execute its reusable repository CI locally before consumers depend on it'
+}
+$actionlintSelfActionIgnore = '^specifying action "\$/\.github/actions/deploy-dokploy" in invalid format because ref is missing\. available formats are "\{owner\}/\{repo\}@\{ref\}" or "\{owner\}/\{repo\}/\{path\}@\{ref\}"$'
+foreach ($lintWorkflow in @($repositoryCi, $selfValidation)) {
+  if ($lintWorkflow -notmatch [regex]::Escape($actionlintSelfActionIgnore)) {
+    throw 'Actionlint must ignore only its exact unsupported self-action syntax diagnostic'
+  }
 }
 
 foreach ($example in Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File) {
@@ -241,24 +248,36 @@ foreach ($requiredDeployControl in @(
   'oauth-client-id: ${{ vars.TS_WIF_CLIENT_ID }}',
   'audience: ${{ vars.TS_WIF_AUDIENCE }}',
   'tags: tag:deploy',
-  'repository: ${{ fromJSON(toJSON(job)).workflow_repository }}',
-  'ref: ${{ fromJSON(toJSON(job)).workflow_sha }}',
+  'uses: $/.github/actions/deploy-dokploy',
   'DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}',
   'DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}',
   'HEALTH_URL: ${{ vars.HEALTH_URL }}',
   'DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}',
   'EXPECTED_REVISION: ${{ github.sha }}',
   'RELEASE_REF: ${{ env.RELEASE_REF }}',
-  'APP_REVISION=${{ github.sha }}',
-  'bash .pipeline-runtime/scripts/deploy-dokploy.sh'
+  'APP_REVISION=${{ github.sha }}'
 )) {
   if ($releaseJob -notmatch [regex]::Escape($requiredDeployControl)) {
     throw "Container release omits private deploy control: $requiredDeployControl"
   }
 }
+if (@([regex]::Matches($releaseJob, '(?m)^\s+uses:\s+actions/checkout@')).Count -ne 1) {
+  throw 'Container release must checkout only the caller repository'
+}
+if ($releaseJob -match '(?m)workflow_(repository|sha)|\.pipeline-runtime|scripts/deploy-dokploy\.sh') {
+  throw 'Container release must not checkout or invoke the deploy helper through a caller-token path'
+}
+
+$deployAction = Get-Content -Raw -LiteralPath '.github\actions\deploy-dokploy\action.yml'
+if ($deployAction -match '(?m)^inputs:|^\s+inputs:|^secrets:|^\s+secrets:') {
+  throw 'The deploy action must receive its environment from the reusable workflow without inputs or secrets'
+}
+if ($deployAction -notmatch '(?m)^\s+run:\s+bash "\$GITHUB_ACTION_PATH/deploy-dokploy\.sh"\s*$') {
+  throw 'The deploy action must execute its co-located helper through GITHUB_ACTION_PATH'
+}
 $scanIndex = $releaseJob.IndexOf('aquasecurity/trivy-action@')
 $tailscaleIndex = $releaseJob.IndexOf('tailscale/github-action@')
-$deployIndex = $releaseJob.IndexOf('bash .pipeline-runtime/scripts/deploy-dokploy.sh')
+$deployIndex = $releaseJob.IndexOf('uses: $/.github/actions/deploy-dokploy')
 if ($scanIndex -lt 0 -or $tailscaleIndex -le $scanIndex -or $deployIndex -le $tailscaleIndex) {
   throw 'Private Dokploy deployment must run through Tailscale only after the exact-digest Trivy scan'
 }
@@ -287,8 +306,8 @@ if ($containerReleaseCallerJob -match '(?m)^ {4}secrets:\s*(inherit\s*$|$)' -or 
 
 $releaseExamplePin = [regex]::Match($containerReleaseExample, '(?m)^ {4}uses:\s+LouisVannobel/projetV0-pipelines/\.github/workflows/reusable-container-release\.yml@(?<sha>[0-9a-f]{40})\s+#\s+v\d+\.\d+\.\d+\s*$')
 if (-not $releaseExamplePin.Success) { throw 'The container release example must expose its immutable full SHA' }
-$pinnedHelper = ConvertTo-NormalizedLineEndingBytes (Get-GitBlobBytes "$($releaseExamplePin.Groups['sha'].Value):scripts/deploy-dokploy.sh")
-$currentHelper = ConvertTo-NormalizedLineEndingBytes ([System.IO.File]::ReadAllBytes((Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts/deploy-dokploy.sh')))
+$pinnedHelper = ConvertTo-NormalizedLineEndingBytes (Get-GitBlobBytes "$($releaseExamplePin.Groups['sha'].Value):$deployActionScriptPath")
+$currentHelper = ConvertTo-NormalizedLineEndingBytes ([System.IO.File]::ReadAllBytes((Join-Path (Split-Path -Parent $PSScriptRoot) $deployActionScriptPath)))
 if ([Convert]::ToBase64String($pinnedHelper) -ne [Convert]::ToBase64String($currentHelper)) {
   throw 'The container release example must pin the exact behavior-tested Dokploy helper'
 }
@@ -312,7 +331,7 @@ $actionlintExe = $env:ACTIONLINT_EXE
 if ($actionlintExe) {
   if (-not (Test-Path -LiteralPath $actionlintExe)) { throw "actionlint executable not found: $actionlintExe" }
   $exampleWorkflows = @(Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File | ForEach-Object FullName)
-  & $actionlintExe @($workflows + '.github\workflows\validate-pipelines.yml' + $exampleWorkflows)
+  & $actionlintExe -ignore $actionlintSelfActionIgnore @($workflows + '.github\workflows\validate-pipelines.yml' + $exampleWorkflows)
   if ($LASTEXITCODE -ne 0) { throw "actionlint failed with exit code $LASTEXITCODE" }
 }
 
