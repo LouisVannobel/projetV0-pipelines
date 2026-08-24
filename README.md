@@ -1,32 +1,27 @@
 # projetV0-pipelines
 
-Workflows GitHub Actions réutilisables pour les dépôts du studio. Le dépôt sépare strictement la CI de pull request, en lecture seule, de la publication d'images OCI.
+Workflows GitHub Actions réutilisables pour les SaaS du studio.
 
 ## Appel depuis un SaaS
 
-Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` dans le SaaS. Le workflow est épinglé au commit immuable :
+Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` et `examples/container-release.yml` vers `.github/workflows/release.yml`. Les deux workflows sont épinglés au même commit immuable :
 
-`399df8dcb93a28734269ad11b63e847896684487` (`v1.0.0`)
+`de87dbad3eccace3cffdbccbe78c2fc98f77a68c` (`v1.1.0`)
 
-Le SaaS doit fournir les scripts pnpm `lint`, `typecheck`, `test`, `build`, `test:a11y` et `lighthouse`, un `pnpm-lock.yaml` commité et un Dockerfile multi-stage.
+Le SaaS fournit `package.json`, `pnpm-lock.yaml`, un Dockerfile multi-stage et les scripts pnpm `lint`, `typecheck`, `test`, `build`, `test:a11y` et `lighthouse`. La CI exécute ces contrôles et publie le statut requis `CI / gate`.
 
-## Contrôles communs
+## Release
 
-- installation `pnpm --frozen-lockfile` ;
-- lint, typecheck, tests et build ;
-- Playwright/axe-core et Lighthouse ;
-- Gitleaks téléchargé avec checksum vérifié ;
-- Trivy sur le dépôt et l'image ;
-- image de release avec SBOM et provenance ;
-- actions tierces épinglées à leur SHA Git complet ;
-- Checkout v7.0.1, Trivy CLI v0.74.0, Buildx v0.36.1 et son daemon BuildKit v0.32.2 explicitement épinglés.
+Le push sur `main` construit une seule image GHCR, scanne ce digest immuable, puis déploie ce même digest via le tailnet Dokploy. Le caller accorde `contents: read`, `packages: write` et `id-token: write`.
 
-`examples/container-release.yml` est un template expérimental non activé. Avant un usage en production, le dépôt consommateur doit protéger ses tags et publier exactement le digest scanné sans rebuild.
+Configurer les variables du dépôt `DOKPLOY_APPLICATION_ID`, `DOKPLOY_URL`, `HEALTH_URL`, `TS_WIF_CLIENT_ID` et `TS_WIF_AUDIENCE`, ainsi que `DOKPLOY_API_KEY` comme secret de l'environnement `production`. Aucun secret Dokploy n'est transmis par le caller.
+
+L'application Dokploy doit utiliser la source Docker (`sourceType: docker`) et les identifiants de pull du registre GHCR privé doivent être configurés directement dans Dokploy. Utiliser un compte/API Dokploy dédié à cette application, limité à ce service et aux permissions minimales `service:read/create` et `deployment:read/create`. L'environnement GitHub `production` doit être protégé par les règles d'approbation adaptées au studio.
+
+`HEALTH_URL` doit converger sans redirection vers un HTTP 200 exact avec un JSON dont `revision` est le SHA déployé. Le workflow produit une provenance et un SBOM OCI, sans revendiquer de conformité SLSA formelle.
 
 ## Appel depuis un dépôt d'infrastructure
 
 Copier `examples/repository-ci.yml` vers `.github/workflows/ci.yml`. Le caller active le contrôle générique du dépôt puis, avec `run-infrastructure-static: true`, la syntaxe Bash, les erreurs ShellCheck, les tests de contrat locaux, les modèles Compose sans secrets et le contrat des locks d'images. Aucun accès SSH, secret de déploiement ou balayage anonyme de registre n'est utilisé.
 
-Le workflow transverse est épinglé au commit immuable :
-
-`399df8dcb93a28734269ad11b63e847896684487` (`v1.0.0`)
+Le workflow transverse reste épinglé à son interface immuable documentée dans `examples/repository-ci.yml`.

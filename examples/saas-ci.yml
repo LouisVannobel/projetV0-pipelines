@@ -10,8 +10,4 @@ permissions:
 
 jobs:
   ci:
-    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-saas-ci.yml@399df8dcb93a28734269ad11b63e847896684487 # v1.0.0
-    with:
-      node-version: "24"
-      pnpm-version: "11.21.0"
-      image-name: studio/my-saas
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-saas-ci.yml@de87dbad3eccace3cffdbccbe78c2fc98f77a68c # v1.1.0

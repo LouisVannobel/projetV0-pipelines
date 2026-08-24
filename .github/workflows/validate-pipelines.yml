@@ -17,9 +17,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Test reusable workflow contracts
         shell: pwsh
         run: pwsh -File tests/test_pipeline_contracts.ps1
+      - name: Test private Dokploy deploy boundary
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/test_dokploy_deploy.ps1
       - name: Validate GitHub Actions syntax
         shell: bash
         run: |
