@@ -112,7 +112,45 @@ jobs:
           [[ "${#descriptors[@]}" -eq 2 ]]
           platform_digest="${descriptors[0]}"
           attestation_digest="${descriptors[1]}"
+          $crane manifest "$IMAGE@$platform_digest" > platform-manifest.json
+          printf '%s  %s\n' "${platform_digest#sha256:}" platform-manifest.json | sha256sum --check
+          python3 - <<'PY'
+          import json
+          import re
+
+          digest = re.compile(r"sha256:[0-9a-f]{64}")
+          with open("platform-manifest.json", encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          if (manifest.get("schemaVersion") != 2
+                  or manifest.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"):
+              raise SystemExit("invalid runnable OCI manifest")
+          config = manifest.get("config")
+          if (not isinstance(config, dict)
+                  or config.get("mediaType") != "application/vnd.oci.image.config.v1+json"
+                  or not digest.fullmatch(config.get("digest", ""))
+                  or isinstance(config.get("size"), bool)
+                  or not isinstance(config.get("size"), int)
+                  or config["size"] <= 0):
+              raise SystemExit("invalid runnable OCI config descriptor")
+          layers = manifest.get("layers")
+          supported_layer_types = {
+              "application/vnd.oci.image.layer.v1.tar",
+              "application/vnd.oci.image.layer.v1.tar+gzip",
+              "application/vnd.oci.image.layer.v1.tar+zstd",
+          }
+          if not isinstance(layers, list) or not layers:
+              raise SystemExit("runnable OCI manifest must contain layers")
+          for layer in layers:
+              if (not isinstance(layer, dict)
+                      or layer.get("mediaType") not in supported_layer_types
+                      or not digest.fullmatch(layer.get("digest", ""))
+                      or isinstance(layer.get("size"), bool)
+                      or not isinstance(layer.get("size"), int)
+                      or layer["size"] <= 0):
+                  raise SystemExit("invalid runnable OCI layer descriptor")
+          PY
           $crane manifest "$IMAGE@$attestation_digest" > attestation-manifest.json
+          printf '%s  %s\n' "${attestation_digest#sha256:}" attestation-manifest.json | sha256sum --check
           mapfile -t statement_digests < <(python3 - "$platform_digest" <<'PY'
           import json
           import re
