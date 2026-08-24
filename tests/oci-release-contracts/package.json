@@ -1,0 +1,11 @@
+{
+  "name": "oci-release-contracts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test validate-release-workflow.test.mjs test-release-run-blocks.mjs"
+  },
+  "devDependencies": {
+    "yaml": "2.8.1"
+  }
+}
