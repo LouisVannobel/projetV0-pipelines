@@ -10,7 +10,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@ab75f5d71ceb1856fb6930f074bfd5e4505b7041 # v1.2.0
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@eff9cfbb1c66ed36a386f475d493ccf9daaed3c8 # v1.2.0
     with:
       registry-username: ${{ github.actor }}
       image: ghcr.io/example/voice-runtime

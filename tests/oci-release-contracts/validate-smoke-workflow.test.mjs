@@ -36,7 +36,7 @@ test('the separate OCI example exposes metadata but deploys only the digest refe
 test('the OCI example accepts only the corrected immutable workflow revision', () => {
   const example = loadFixture(examplePath);
   const corrected = structuredClone(example);
-  corrected.jobs.release.uses = 'LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@ab75f5d71ceb1856fb6930f074bfd5e4505b7041';
+  corrected.jobs.release.uses = 'LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@eff9cfbb1c66ed36a386f475d493ccf9daaed3c8';
   assert.deepEqual(validateExample(corrected), []);
 
   const broken = structuredClone(example);

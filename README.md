@@ -30,6 +30,6 @@ Le workflow transverse reste épinglé à son interface immuable documentée dan
 
 Le contrat Voice est séparé du chemin SaaS/Dokploy existant. `reusable-oci-release.yml` construit une seule fois une image `linux/amd64`, scanne son digest racine, vérifie ses attestations puis promeut ce même digest. Il ne publie pas `latest` et ne déploie rien.
 
-Copier `examples/oci-release.yml` dans le dépôt appelant. L'exemple est épinglé à la révision immuable corrigée `ab75f5d71ceb1856fb6930f074bfd5e4505b7041`; le commentaire `v1.2.0` réserve le futur repère lisible, qui reste en attente du smoke GHCR, de la revue finale, du merge et de sa création par le contrôleur. Le tag SaaS/Dokploy `v1.1.0` reste inchangé et ne doit jamais être déplacé.
+Copier `examples/oci-release.yml` dans le dépôt appelant. L'exemple est épinglé à la révision immuable lintée `eff9cfbb1c66ed36a386f475d493ccf9daaed3c8`; le commentaire `v1.2.0` réserve le futur repère lisible. Le smoke GHCR, la CI finale du PR, la revue finale, le merge et la création du tag restent en attente. Le tag SaaS/Dokploy `v1.1.0` reste inchangé et ne doit jamais être déplacé.
 
 Le workflow expose `image-digest`, `image-reference` et `sbom-artifact`. Le déploiement consomme exclusivement `image-reference` (`image@sha256:...`). Les tags de version et de révision peuvent être résolus pour fournir une preuve, mais ne sont jamais une entrée de déploiement.

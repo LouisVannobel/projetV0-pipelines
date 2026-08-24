@@ -118,7 +118,7 @@ export function validateExample(workflow) {
   const release = jobs.release ?? {};
   const consume = jobs.consume ?? {};
   const uses = release.uses ?? '';
-  const reviewedSha = 'ab75f5d71ceb1856fb6930f074bfd5e4505b7041';
+  const reviewedSha = 'eff9cfbb1c66ed36a386f475d493ccf9daaed3c8';
   fail(errors, typeof uses === 'string'
     && uses === `LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@${reviewedSha}`,
   'example: reusable workflow must use the corrected immutable workflow SHA');
