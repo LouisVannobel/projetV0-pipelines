@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test, { after } from 'node:test';
@@ -17,11 +18,18 @@ assert.equal(inspectSteps.length, 1, 'one production inspect-raw-oci scalar exis
 const productionRun = inspectSteps[0].run;
 
 const temporary = fs.mkdtempSync(path.join(root, '.tmp-smoke-run-block-'));
-const fakeBin = path.join(temporary, 'bin');
 const fixturesDir = path.join(temporary, 'fixtures');
-fs.mkdirSync(fakeBin);
 fs.mkdirSync(fixturesDir);
 after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+const bashExecutable = process.platform === 'win32'
+  ? 'C:/Program Files/Git/bin/bash.exe'
+  : '/usr/bin/bash';
+assert.equal(fs.existsSync(bashExecutable), true, `fixed Bash exists at ${bashExecutable}`);
+const pythonExecutable = process.platform === 'win32'
+  ? path.join(os.homedir(), '.cache', 'codex-runtimes', 'codex-primary-runtime',
+    'dependencies', 'python', 'python.exe').replaceAll('\\', '/')
+  : '/usr/bin/python3';
+assert.equal(fs.existsSync(pythonExecutable), true, `fixed Python exists at ${pythonExecutable}`);
 
 const relative = (target) => path.relative(root, target).replaceAll('\\', '/');
 const sha256 = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
@@ -135,42 +143,7 @@ function createFixtures(name, options = {}) {
   return { directory, rootIndex, platform, attestation, sbom, provenance };
 }
 
-fs.writeFileSync(path.join(fakeBin, 'curl'), `#!/usr/bin/env bash
-set -Eeuo pipefail
-printf 'curl\\n' >>"$COMMAND_LOG"
-output=''
-while [[ "$#" -gt 0 ]]; do
-  if [[ "$1" == --output ]]; then output="$2"; shift 2; else shift; fi
-done
-[[ -n "$output" ]]
-printf 'archive' >"$output"
-`);
-fs.writeFileSync(path.join(fakeBin, 'sha256sum'), `#!/usr/bin/env bash
-set -Eeuo pipefail
-line="$(cat)"
-printf 'sha256sum\\t%s\\n' "$line" >>"$COMMAND_LOG"
-expected="\${line%%  *}"
-file="\${line#*  }"
-if [[ "$expected" == 5c16d8ddb971cb1d5e6ed8b1e743da8224414eeba2c2762d8f1a61b2f095699e ]]; then
-  [[ "$file" == "$RUNNER_TEMP/go-containerregistry_Linux_x86_64.tar.gz" ]]
-  touch "$CHECKSUM_MARKER"
-else
-  /usr/bin/sha256sum --check <<<"$line"
-fi
-`);
-fs.writeFileSync(path.join(fakeBin, 'tar'), `#!/usr/bin/env bash
-set -Eeuo pipefail
-printf 'tar\\n' >>"$COMMAND_LOG"
-[[ -f "$CHECKSUM_MARKER" ]]
-destination=''
-while [[ "$#" -gt 0 ]]; do
-  if [[ "$1" == -C ]]; then destination="$2"; shift 2; else shift; fi
-done
-[[ -n "$destination" ]]
-cp "$CRANE_TEMPLATE" "$destination/crane"
-chmod +x "$destination/crane"
-`);
-const craneTemplate = path.join(fakeBin, 'crane-template');
+const craneTemplate = path.join(temporary, 'crane-template');
 fs.writeFileSync(craneTemplate, `#!/usr/bin/env bash
 set -Eeuo pipefail
 {
@@ -214,16 +187,48 @@ case "$command" in
   *) exit 94 ;;
 esac
 `);
-for (const file of ['curl', 'sha256sum', 'tar', 'crane-template']) {
-  fs.chmodSync(path.join(fakeBin, file), 0o755);
+
+const shellFakes = `curl() {
+  set -Eeuo pipefail
+  printf 'curl\\n' >>"$COMMAND_LOG"
+  output=''
+  while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == --output ]]; then output="$2"; shift 2; else shift; fi
+  done
+  [[ -n "$output" ]]
+  printf 'archive' >"$output"
 }
 
+sha256sum() {
+  set -Eeuo pipefail
+  line="$(cat)"
+  printf 'sha256sum\\t%s\\n' "$line" >>"$COMMAND_LOG"
+  expected="\${line%%  *}"
+  file="\${line#*  }"
+  if [[ "$expected" == 5c16d8ddb971cb1d5e6ed8b1e743da8224414eeba2c2762d8f1a61b2f095699e ]]; then
+    [[ "$file" == "$RUNNER_TEMP/go-containerregistry_Linux_x86_64.tar.gz" ]]
+    touch "$CHECKSUM_MARKER"
+  else
+    /usr/bin/sha256sum --check <<<"$line"
+  fi
+}
+
+tar() {
+  set -Eeuo pipefail
+  printf 'tar\\n' >>"$COMMAND_LOG"
+  [[ -f "$CHECKSUM_MARKER" ]]
+  destination=''
+  while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == -C ]]; then destination="$2"; shift 2; else shift; fi
+  done
+  [[ -n "$destination" ]]
+  /usr/bin/install -m 0700 "$CRANE_TEMPLATE" "$destination/crane"
+}`;
 const runner = path.join(temporary, 'run-smoke-scalar.sh');
 fs.writeFileSync(runner, `#!/usr/bin/env bash
 set -Eeuo pipefail
 root="$(pwd -P)"
 source "$root/$1"
-export PATH="$root/$2:$PATH"
 export RUNNER_TEMP="$root/$RUNNER_TEMP_REL"
 export COMMAND_LOG="$root/$COMMAND_LOG_REL"
 export CHECKSUM_MARKER="$root/$CHECKSUM_MARKER_REL"
@@ -234,7 +239,11 @@ export ATTESTATION_FIXTURE="$root/$ATTESTATION_FIXTURE_REL"
 export SBOM_FIXTURE="$root/$SBOM_FIXTURE_REL"
 export PROVENANCE_FIXTURE="$root/$PROVENANCE_FIXTURE_REL"
 cd "$root/$WORKING_DIRECTORY_REL"
-bash "$root/$3"
+${shellFakes}
+export PYTHON_EXECUTABLE="$4"
+python3() { "$PYTHON_EXECUTABLE" "$@" | /usr/bin/tr -d '\\r'; }
+export -f curl sha256sum tar python3
+"$3" "$root/$2"
 `);
 
 function execute(fixtures, overrides = {}, runScalar = productionRun) {
@@ -276,8 +285,8 @@ function execute(fixtures, overrides = {}, runScalar = productionRun) {
   fs.writeFileSync(environmentPath, Object.entries(environment)
     .map(([name, value]) => `export ${name}=${shellQuote(value)}`)
     .join('\n'));
-  const result = spawnSync('bash', [
-    relative(runner), relative(environmentPath), relative(fakeBin), relative(scalarPath)
+  const result = spawnSync(bashExecutable, [
+    relative(runner), relative(environmentPath), relative(scalarPath), bashExecutable, pythonExecutable
   ], { cwd: root, encoding: 'utf8' });
   return {
     ...result,
@@ -290,7 +299,7 @@ function execute(fixtures, overrides = {}, runScalar = productionRun) {
 test('live-shaped raw OCI graph succeeds and emits sanitized evidence', () => {
   const fixtures = createFixtures('valid');
   const result = execute(fixtures);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, `${result.stderr}\n${result.commandLog}`);
   assert.match(result.commandLog, /crane\tmanifest\tghcr\.io\/louisvannobel\/projetv0-pipelines-smoke@sha256:/);
   assert.match(result.commandLog, new RegExp(`crane\\tmanifest\\t${image}@${fixtures.platform.digest}`));
   assert.match(result.commandLog, new RegExp(`crane\\tmanifest\\t${image}@${fixtures.attestation.digest}`));
