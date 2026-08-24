@@ -118,6 +118,35 @@ if ($gate -notmatch '(?ms)case "\$QUALITY_RESULT" in.*?success\) ;;.*?\*\).*?exi
 if ($gate -notmatch '(?ms)for result in "\$ACCESSIBILITY_RESULT" "\$LIGHTHOUSE_RESULT" "\$CONTAINER_RESULT"; do.*?case "\$result" in.*?success\|skipped\) ;;.*?\*\).*?exit 1.*?esac.*?done') { throw 'SaaS gate must reject non-success/non-skipped optional results' }
 if ($gate -match '(?i)permissions:.*(write|read-all)') { throw 'SaaS gate must not request write permissions' }
 
+$containerRelease = Get-Content -Raw -LiteralPath '.github\workflows\reusable-container-release.yml'
+$containerBuilds = @([regex]::Matches($containerRelease, '(?m)^\s*uses:\s+docker/build-push-action@[0-9a-f]{40}'))
+if ($containerBuilds.Count -ne 1) { throw 'Container release must build exactly once before scanning its pushed digest' }
+foreach ($requiredReleaseControl in @(
+  'push: true',
+  'sbom: true',
+  'provenance: mode=max',
+  'RELEASE_IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"',
+  'RELEASE_DIGEST="${{ steps.build.outputs.digest }}"',
+  'RELEASE_REF="${RELEASE_IMAGE}@${RELEASE_DIGEST}"',
+  "if [[ ! `"`$RELEASE_DIGEST`" =~ ^sha256:[a-f0-9]{64}`$ ]]; then",
+  'image-ref: ${{ env.RELEASE_REF }}'
+)) {
+  if ($containerRelease -notmatch [regex]::Escape($requiredReleaseControl)) {
+    throw "Container release omits required build-once digest control: $requiredReleaseControl"
+  }
+}
+if ($containerRelease -match '(?im)(^|[^a-z])latest([^a-z]|$)') {
+  throw 'Container release must not publish or scan a latest image tag'
+}
+
+$containerReleaseExample = Get-Content -Raw -LiteralPath 'examples\container-release.yml'
+if ($containerReleaseExample -notmatch '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\["main"\]') {
+  throw 'The container release example must trigger on pushes to main'
+}
+if ($containerReleaseExample -match '(?ms)^\s+with:\s*$') {
+  throw 'The container release example must rely on the reusable release defaults and omit inputs'
+}
+
 $actionlintExe = $env:ACTIONLINT_EXE
 if ($actionlintExe) {
   if (-not (Test-Path -LiteralPath $actionlintExe)) { throw "actionlint executable not found: $actionlintExe" }
