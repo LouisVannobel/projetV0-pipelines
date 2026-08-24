@@ -1,0 +1,8 @@
+name: Deploy through Dokploy
+description: Deploy the verified release digest through the private Dokploy API
+runs:
+  using: composite
+  steps:
+    - name: Deploy verified digest
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/deploy-dokploy.sh"
