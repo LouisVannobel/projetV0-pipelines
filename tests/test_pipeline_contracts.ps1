@@ -91,6 +91,50 @@ foreach ($example in Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File
   }
 }
 
+function Get-RequiredWorkflowCallFields {
+  param(
+    [string]$Workflow,
+    [string]$Section
+  )
+
+  $sectionMatch = [regex]::Match($Workflow, "(?ms)^ {4}${Section}:\s*$.*?(?=^ {4}\S|\z)")
+  if (-not $sectionMatch.Success) { return @() }
+
+  return @([regex]::Matches($sectionMatch.Value, '(?ms)^ {6}(?<name>[A-Za-z0-9_-]+):\s*$.*?(?=^ {6}[A-Za-z0-9_-]+:\s*$|^ {4}\S|\z)') |
+    Where-Object { $_.Value -match '(?m)^ {8}required:\s*true\s*$' } |
+    ForEach-Object { $_.Groups['name'].Value })
+}
+
+foreach ($example in Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File) {
+  $source = Get-Content -Raw -LiteralPath $example.FullName
+  $sameRepositoryCalls = @([regex]::Matches($source, '(?m)^[ \t]{4}uses:[ \t]+LouisVannobel/projetV0-pipelines/(?<path>[^@\s]+)@(?<sha>[0-9a-f]{40})(?:[ \t]+#.*)?$'))
+  foreach ($call in $sameRepositoryCalls) {
+    $workflowAtPin = & git show "$($call.Groups['sha'].Value):$($call.Groups['path'].Value)"
+    if ($LASTEXITCODE -ne 0) { throw "Example caller references an unreadable pinned workflow: $($call.Value)" }
+    $workflowAtPin = $workflowAtPin -join "`n"
+
+    $jobStarts = @([regex]::Matches($source, '(?m)^ {2}[A-Za-z0-9_-]+:\s*$'))
+    $jobStart = $jobStarts | Where-Object { $_.Index -lt $call.Index } | Select-Object -Last 1
+    if ($null -eq $jobStart) { throw "Example caller has no job for reusable workflow: $($call.Value)" }
+    $nextJobStart = $jobStarts | Where-Object { $_.Index -gt $jobStart.Index } | Select-Object -First 1
+    $jobLength = if ($null -eq $nextJobStart) { $source.Length - $jobStart.Index } else { $nextJobStart.Index - $jobStart.Index }
+    $job = $source.Substring($jobStart.Index, $jobLength)
+    $with = [regex]::Match($job, '(?ms)^ {4}with:\s*$.*?(?=^ {4}\S|\z)').Value
+    $secrets = [regex]::Match($job, '(?ms)^ {4}secrets:\s*$.*?(?=^ {4}\S|\z)').Value
+
+    foreach ($requiredInput in Get-RequiredWorkflowCallFields -Workflow $workflowAtPin -Section 'inputs') {
+      if ($with -notmatch "(?m)^ {6}$([regex]::Escape($requiredInput)):\s*") {
+        throw "Example caller does not supply required input '$requiredInput' to its pinned reusable workflow: $($call.Value)"
+      }
+    }
+    foreach ($requiredSecret in Get-RequiredWorkflowCallFields -Workflow $workflowAtPin -Section 'secrets') {
+      if ($job -notmatch '(?m)^ {4}secrets:\s+inherit\s*$' -and $secrets -notmatch "(?m)^ {6}$([regex]::Escape($requiredSecret)):\s*") {
+        throw "Example caller does not supply required secret '$requiredSecret' to its pinned reusable workflow: $($call.Value)"
+      }
+    }
+  }
+}
+
 $repositoryExample = Get-Content -Raw -LiteralPath 'examples\repository-ci.yml'
 if ($repositoryExample -notmatch '(?ms)^\s*with:\s*$.*^\s+run-infrastructure-static:\s*true\s*$') {
   throw 'The infrastructure example must enable repository-local static validation'

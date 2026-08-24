@@ -9,4 +9,4 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-container-release.yml@399df8dcb93a28734269ad11b63e847896684487 # v1.0.0
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-container-release.yml@15c84ba1642229d095c5c96d48bfcdcb427de6af # v1.1.0
