@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$deployScript = Join-Path $repoRoot 'scripts/deploy-dokploy.sh'
+$deployScript = Join-Path $repoRoot '.github/actions/deploy-dokploy/deploy-dokploy.sh'
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("dokploy-deploy-tests-{0}" -f [guid]::NewGuid())
 $fakeBin = Join-Path $tempRoot 'bin'
 $stateDir = Join-Path $tempRoot 'state'
