@@ -11,12 +11,26 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(testDir, '..', '..');
 const smokePath = path.join(repository, '.github', 'workflows', 'smoke-oci-release.yml');
 const examplePath = path.join(repository, 'examples', 'oci-release.yml');
+const fixtureDockerfilePath = path.join(repository, 'tests', 'fixtures', 'oci-release', 'Dockerfile');
 const validatorPath = path.join(testDir, 'validate-smoke-workflow.mjs');
 const loadFixture = (file) => parse(fs.readFileSync(file, 'utf8'));
 
 test('the repository smoke caller proves the additive OCI release contract', () => {
   assert.equal(fs.existsSync(smokePath), true, 'smoke workflow must exist');
   assert.deepEqual(validateSmokeWorkflow(loadFixture(smokePath)), []);
+});
+
+test('the exact scratch smoke fixture ends with a numeric non-root identity', () => {
+  assert.equal(fs.readFileSync(fixtureDockerfilePath, 'utf8').replaceAll('\r\n', '\n'), [
+    'FROM scratch',
+    '',
+    'COPY payload.txt /payload.txt',
+    'USER 65532:65532',
+    ''
+  ].join('\n'));
+  const release = loadFixture(smokePath).jobs.release;
+  assert.equal(release.with['docker-context'], 'tests/fixtures/oci-release');
+  assert.equal(release.with.dockerfile, 'tests/fixtures/oci-release/Dockerfile');
 });
 
 test('smoke validator CLI reads only its fixed repository files', () => {
