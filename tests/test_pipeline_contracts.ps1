@@ -248,7 +248,7 @@ foreach ($requiredDeployControl in @(
   'oauth-client-id: ${{ vars.TS_WIF_CLIENT_ID }}',
   'audience: ${{ vars.TS_WIF_AUDIENCE }}',
   'tags: tag:deploy',
-  'uses: $/.github/actions/deploy-dokploy',
+  "uses: $/.github/actions/deploy-dokploy # NOSONAR: GitHub resolves $/ from this reusable workflow's exact ref.",
   'DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}',
   'DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}',
   'HEALTH_URL: ${{ vars.HEALTH_URL }}',

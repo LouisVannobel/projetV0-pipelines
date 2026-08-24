@@ -98,7 +98,7 @@ jobs:
           audience: ${{ vars.TS_WIF_AUDIENCE }}
           tags: tag:deploy
       - name: Deploy verified digest through Dokploy
-        uses: $/.github/actions/deploy-dokploy
+        uses: $/.github/actions/deploy-dokploy # NOSONAR: GitHub resolves $/ from this reusable workflow's exact ref.
         env:
           DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
