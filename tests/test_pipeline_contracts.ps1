@@ -189,8 +189,8 @@ if ($containerRelease -match '(?im)(^|[^a-z])latest([^a-z]|$)') {
   throw 'Container release must not publish or scan a latest image tag'
 }
 
-if ($containerRelease -notmatch '(?ms)^ {4}secrets:\s*$.*?^ {6}DOKPLOY_API_KEY:\s*$.*?^ {8}required:\s*true\s*$') {
-  throw 'Container release must require a named Dokploy API key secret'
+if ($containerRelease -match '(?m)^ {6}DOKPLOY_API_KEY:\s*\r?$') {
+  throw 'Container release must read the Dokploy API key from its production environment, not workflow_call secrets'
 }
 $releaseJob = [regex]::Match($containerRelease, '(?ms)^  release:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
 foreach ($requiredDeployControl in @(
@@ -235,6 +235,15 @@ if ($containerReleaseExample -notmatch '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+bran
 }
 if ($containerReleaseExample -match '(?ms)^\s+with:\s*$') {
   throw 'The container release example must rely on the reusable release defaults and omit inputs'
+}
+$containerReleaseCallerJob = [regex]::Match($containerReleaseExample, '(?ms)^  release:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
+foreach ($requiredCallerPermission in @('contents: read', 'packages: write', 'id-token: write')) {
+  if ($containerReleaseCallerJob -notmatch [regex]::Escape($requiredCallerPermission)) {
+    throw "The production release caller must grant $requiredCallerPermission"
+  }
+}
+if ($containerReleaseCallerJob -match '(?m)^ {4}secrets:\s*(inherit\s*$|$)' -or $containerReleaseCallerJob -match '(?m)^ {6}DOKPLOY_API_KEY:\s*') {
+  throw 'The production release caller must not pass Dokploy secrets to the reusable workflow'
 }
 
 $actionlintExe = $env:ACTIONLINT_EXE

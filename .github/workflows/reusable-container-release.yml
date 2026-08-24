@@ -12,10 +12,6 @@ on:
       platforms:
         type: string
         default: linux/amd64
-    secrets:
-      DOKPLOY_API_KEY:
-        required: true
-
 permissions: {}
 
 jobs:
