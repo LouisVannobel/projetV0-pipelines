@@ -174,7 +174,7 @@ jobs:
           for filename, predicate_type in statements:
               with open(filename, encoding="utf-8") as handle:
                   statement = json.load(handle)
-              if statement.get("_type") != "https://in-toto.io/Statement/v0.1":
+              if statement.get("_type") != "https://in-toto.io/Statement/v1":
                   raise SystemExit(f"invalid in-toto statement type: {filename}")
               if statement.get("predicateType") != predicate_type or not isinstance(statement.get("predicate"), dict):
                   raise SystemExit(f"invalid predicate: {filename}")

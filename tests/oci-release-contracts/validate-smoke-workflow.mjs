@@ -86,6 +86,7 @@ export function validateSmokeWorkflow(workflow) {
       ['crane blob', 'read raw in-toto blobs'],
       ['application/vnd.docker.attestation.manifest.v1+json', 'validate the attestation artifact type'],
       ['application/vnd.in-toto+json', 'validate every statement layer media type'],
+      ['https://in-toto.io/Statement/v1', 'require the current in-toto statement envelope'],
       ['https://spdx.dev/Document', 'require exactly one SPDX statement'],
       ['https://slsa.dev/provenance/v1', 'require exactly one SLSA v1 statement'],
       ['manifest_subject', 'validate the attestation manifest subject'],
@@ -94,6 +95,8 @@ export function validateSmokeWorkflow(workflow) {
       ['crane digest "$IMAGE:sha-$GITHUB_SHA"', 'resolve the revision tag'],
       ['oci-evidence.json', 'write sanitized evidence']
     ]) fail(errors, run.includes(needle), `evidence: must ${message}`);
+    fail(errors, !run.includes('https://in-toto.io/Statement/v0.1'),
+      'evidence: obsolete in-toto v0.1 statement envelopes must be rejected');
   }
   fail(errors, upload.length === 1
     && upload[0].uses === 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
