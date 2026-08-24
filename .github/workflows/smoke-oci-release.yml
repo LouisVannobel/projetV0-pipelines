@@ -188,8 +188,9 @@ jobs:
               raise SystemExit("invalid SPDX predicate")
           with open("provenance-statement.json", encoding="utf-8") as handle:
               provenance = json.load(handle)["predicate"]
+          builder_id = provenance.get("runDetails", {}).get("builder", {}).get("id")
           if (provenance.get("buildDefinition", {}).get("buildType") != "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md"
-                  or not isinstance(provenance.get("runDetails", {}).get("builder", {}).get("id"), str)):
+                  or not isinstance(builder_id, str) or not builder_id.strip()):
               raise SystemExit("invalid SLSA v1 predicate")
           PY
           python3 - "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$IMAGE_REFERENCE" "$IMAGE_DIGEST" "$platform_digest" "$attestation_digest" "$version_digest" "$revision_digest" <<'PY'

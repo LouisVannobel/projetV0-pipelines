@@ -89,6 +89,7 @@ export function validateSmokeWorkflow(workflow) {
       ['https://in-toto.io/Statement/v1', 'require the current in-toto statement envelope'],
       ['https://spdx.dev/Document', 'require exactly one SPDX statement'],
       ['https://slsa.dev/provenance/v1', 'require exactly one SLSA v1 statement'],
+      ['not builder_id.strip()', 'reject empty SLSA builder identities'],
       ['manifest_subject', 'validate the attestation manifest subject'],
       ['subject_digest', 'compare exact in-toto subjects'],
       ['crane digest "$IMAGE:$VERSION"', 'resolve the version tag'],

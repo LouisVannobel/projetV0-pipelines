@@ -210,6 +210,18 @@ const provenanceObsoleteBuildType = fixture('provenance-obsolete-build-type.json
   buildDefinition: { buildType: 'https://mobyproject.org/buildkit@v1' },
   runDetails: { builder: { id: 'https://github.com/moby/buildkit' } }
 });
+const provenanceEmptyBuilder = fixture('provenance-empty-builder.json', {
+  buildDefinition: {
+    buildType: 'https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md'
+  },
+  runDetails: { builder: { id: '' } }
+});
+const provenanceWhitespaceBuilder = fixture('provenance-whitespace-builder.json', {
+  buildDefinition: {
+    buildType: 'https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md'
+  },
+  runDetails: { builder: { id: '   ' } }
+});
 const provenanceWrong = fixture('provenance-wrong.json', {
   buildDefinition: {}, runDetails: { builder: {} }
 });
@@ -261,6 +273,8 @@ test('attestation scalar exports and validates the root, SPDX, and SLSA predicat
     ['extra runnable', verifyEnvironment(rootExtraRunnable)],
     ['wrong SPDX', verifyEnvironment(rootValid, sbomWrong)],
     ['obsolete BuildKit build type', verifyEnvironment(rootValid, sbomValid, provenanceObsoleteBuildType)],
+    ['empty builder identity', verifyEnvironment(rootValid, sbomValid, provenanceEmptyBuilder)],
+    ['whitespace builder identity', verifyEnvironment(rootValid, sbomValid, provenanceWhitespaceBuilder)],
     ['wrong SLSA', verifyEnvironment(rootValid, sbomValid, provenanceWrong)]
   ]) {
     const caseDirectory = fs.mkdtempSync(path.join(temporary, 'verify-invalid-'));
