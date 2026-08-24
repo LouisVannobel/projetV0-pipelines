@@ -1,13 +1,17 @@
 import fs from 'node:fs';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import { parse } from 'yaml';
 
-const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object ?? {}, key);
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-const sameKeys = (object, keys) => isObject(object)
-  && Object.keys(object).sort().join('\n') === [...keys].sort().join('\n');
+const sameKeys = (object, keys) => {
+  if (!isObject(object) || Object.keys(object).length !== keys.length) return false;
+  return keys.every((key) => Object.hasOwn(object, key));
+};
 const stepsOf = (job) => Array.isArray(job?.steps) ? job.steps : [];
 const fail = (errors, condition, message) => { if (!condition) errors.push(message); };
+const smokeWorkflowUrl = new URL('../../.github/workflows/smoke-oci-release.yml', import.meta.url);
+const exampleWorkflowUrl = new URL('../../examples/oci-release.yml', import.meta.url);
 
 export function validateSmokeWorkflow(workflow) {
   const errors = [];
@@ -35,7 +39,7 @@ export function validateSmokeWorkflow(workflow) {
     && workflow.concurrency['cancel-in-progress'] === false
     && Object.keys(workflow.concurrency).length === 2,
   'concurrency: fixed smoke package must be serialized without cancellation');
-  fail(errors, Object.keys(jobs).sort().join(',') === 'evidence,release',
+  fail(errors, sameKeys(jobs, ['release', 'evidence']),
     'graph: smoke must contain exactly release and evidence jobs');
 
   fail(errors, release.uses === './.github/workflows/reusable-oci-release.yml',
@@ -132,19 +136,14 @@ export function validateExample(workflow) {
   return errors;
 }
 
-export function loadYaml(file) {
-  return parse(fs.readFileSync(file, 'utf8'));
-}
-
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1].replaceAll('\\', '/')}`).href) {
-  const [smokePath, examplePath] = process.argv.slice(2);
-  if (!smokePath || !examplePath) {
-    console.error('Usage: node validate-smoke-workflow.mjs <smoke-workflow> <example>');
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  if (process.argv.length !== 2) {
+    console.error('validator: does not accept paths');
     process.exit(2);
   }
   const errors = [
-    ...validateSmokeWorkflow(loadYaml(smokePath)),
-    ...validateExample(loadYaml(examplePath))
+    ...validateSmokeWorkflow(parse(fs.readFileSync(smokeWorkflowUrl, 'utf8'))),
+    ...validateExample(parse(fs.readFileSync(exampleWorkflowUrl, 'utf8')))
   ];
   if (errors.length) {
     errors.forEach((error) => console.error(`- ${error}`));

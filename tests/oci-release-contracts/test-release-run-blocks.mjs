@@ -305,42 +305,39 @@ function promotionCase(versionExisting, shaExisting, extra = {}) {
 
 const createLines = (log) => log.split(/\r?\n/).filter((line) => line.startsWith('buildx\timagetools\tcreate\t'));
 
-test('promotion classifies destination lookups by exact reference-bound diagnostics', () => {
-  const failures = [];
-  const cases = [
-    ['exact-absent', true],
-    ['manifest-absent', true],
-    ['name-absent', true],
-    ['same', true],
-    ['different', false],
-    ['auth', false],
-    ['network', false],
-    ['tls', false],
-    ['timeout', false],
-    ['server', false],
-    ['malformed-not-found', false],
-    ['credential-helper-not-found', false],
-    ['unrelated-not-found', false],
-    ['mixed-multiline', false]
-  ];
-  for (const destination of ['version', 'revision']) {
-    for (const [mode, accepted] of cases) {
+const promotionDiagnostics = [
+  ['exact-absent', true],
+  ['manifest-absent', true],
+  ['name-absent', true],
+  ['same', true],
+  ['different', false],
+  ['auth', false],
+  ['network', false],
+  ['tls', false],
+  ['timeout', false],
+  ['server', false],
+  ['malformed-not-found', false],
+  ['credential-helper-not-found', false],
+  ['unrelated-not-found', false],
+  ['mixed-multiline', false]
+];
+
+for (const destination of ['version', 'revision']) {
+  for (const [mode, accepted] of promotionDiagnostics) {
+    test(`promotion ${accepted ? 'accepts' : 'rejects'} ${destination} diagnostic ${mode}`, () => {
       const versionExisting = destination === 'version' ? mode : 'same';
       const shaExisting = destination === 'revision' ? mode : 'same';
       const { result, log } = promotionCase(versionExisting, shaExisting);
-      if ((result.status === 0) !== accepted) {
-        failures.push(`${destination} ${mode}: accepted=${result.status === 0}; stderr=${result.stderr.trim()}`);
-      }
-      if (createLines(log).length !== (accepted ? 1 : 0)) {
-        failures.push(`${destination} ${mode}: create-count=${createLines(log).length}`);
-      }
-    }
+      assert.equal(result.status === 0, accepted, result.stderr);
+      assert.equal(createLines(log).length, accepted ? 1 : 0);
+    });
   }
+}
 
+test('promotion fails when a destination appears after an accepted absence probe', () => {
   const raced = promotionCase('exact-absent', 'exact-absent', { FINAL_VERSION_DIGEST: otherDigest });
   assert.notEqual(raced.result.status, 0);
   assert.equal(createLines(raced.log).length, 1);
-  assert.deepEqual(failures, []);
 });
 
 test('promotion rejects a version that aliases the revision destination', () => {

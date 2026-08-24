@@ -2,12 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { validateWorkflow } from './validate-release-workflow.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const validSource = fs.readFileSync(path.join(here, 'fixtures', 'valid-release-workflow.yml'), 'utf8');
+const validatorPath = path.join(here, 'validate-release-workflow.mjs');
 
 function violations(source = validSource) {
   return validateWorkflow(parse(source));
@@ -39,6 +41,17 @@ function stepById(workflow, jobName, id) {
 }
 
 test('accepts the complete behavior-tested build-once graph', () => assert.deepEqual(violations(), []));
+
+test('release validator CLI reads only its fixed repository workflow', () => {
+  const known = spawnSync(process.execPath, [validatorPath], { encoding: 'utf8' });
+  assert.equal(known.status, 0, known.stderr);
+
+  const redirected = spawnSync(process.execPath, [validatorPath, path.join(here, 'fixtures', 'valid-release-workflow.yml')], {
+    encoding: 'utf8'
+  });
+  assert.equal(redirected.status, 2);
+  assert.match(redirected.stderr, /does not accept paths/);
+});
 
 rejectsObjectMutation('rejects a result step without canonical output emission', (workflow) => {
   stepById(workflow, 'promote', 'result').run = 'echo result';

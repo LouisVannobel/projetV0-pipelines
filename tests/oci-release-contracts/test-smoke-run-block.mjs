@@ -298,7 +298,7 @@ test('live-shaped raw OCI graph succeeds and emits sanitized evidence', () => {
   assert.match(result.commandLog, /sha256sum\t5c16d8ddb971cb1d5e6ed8b1e743da8224414eeba2c2762d8f1a61b2f095699e/);
   assert.equal(fs.existsSync(result.evidencePath), true);
   const evidence = JSON.parse(fs.readFileSync(result.evidencePath, 'utf8'));
-  assert.deepEqual(Object.keys(evidence).sort(), [
+  assert.deepEqual(Object.keys(evidence).sort((left, right) => left.localeCompare(right)), [
     'attestation_digest', 'commit', 'image_reference', 'platform_digest', 'revision_tag_digest',
     'root_digest', 'run_attempt', 'run_id', 'version_tag_digest'
   ]);

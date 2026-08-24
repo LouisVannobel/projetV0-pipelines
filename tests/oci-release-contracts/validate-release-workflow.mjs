@@ -1,7 +1,6 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { parse } from 'yaml';
 
 const refs = {
@@ -23,12 +22,14 @@ const canonicalRunJobs = {
   result: 'promote'
 };
 
-const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object ?? {}, key);
+const hasOwn = (object, key) => Object.hasOwn(object ?? {}, key);
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const stepsOf = (job) => Array.isArray(job?.steps) ? job.steps : [];
 const compact = (value) => typeof value === 'string' ? value.replace(/\s+/g, '') : '';
-const sameKeys = (object, keys) => isObject(object)
-  && Object.keys(object).sort().join('\n') === [...keys].sort().join('\n');
+const sameKeys = (object, keys) => {
+  if (!isObject(object) || Object.keys(object).length !== keys.length) return false;
+  return keys.every((key) => Object.hasOwn(object, key));
+};
 const sameRecord = (object, expected) => sameKeys(object, Object.keys(expected))
   && Object.entries(expected).every(([key, value]) => object[key] === value);
 const fail = (errors, condition, message) => { if (!condition) errors.push(message); };
@@ -51,23 +52,17 @@ function runById(workflow, jobName, id) {
   return stepsOf(workflow?.jobs?.[jobName]).find((step) => step?.id === id);
 }
 
-const canonicalFixturePath = fileURLToPath(new URL('./fixtures/valid-release-workflow.yml', import.meta.url));
-const canonicalFixture = parse(fs.readFileSync(canonicalFixturePath, 'utf8'));
+const canonicalFixtureUrl = new URL('./fixtures/valid-release-workflow.yml', import.meta.url);
+const productionWorkflowUrl = new URL('../../.github/workflows/reusable-oci-release.yml', import.meta.url);
+const canonicalFixture = parse(fs.readFileSync(canonicalFixtureUrl, 'utf8'));
 const canonicalRuns = Object.fromEntries(Object.entries(canonicalRunJobs).map(([id, jobName]) => {
   const run = runById(canonicalFixture, jobName, id)?.run;
   if (typeof run !== 'string') throw new Error(`canonical fixture is missing ${jobName}.${id}`);
   return [id, run];
 }));
 
-export function validateWorkflow(workflow) {
-  const errors = [];
-  const jobs = isObject(workflow?.jobs) ? workflow.jobs : {};
-  const build = jobs.build ?? {};
-  const verify = jobs.verify ?? {};
-  const promote = jobs.promote ?? {};
-  const jobNames = Object.keys(jobs).sort();
-
-  fail(errors, jobNames.join(',') === 'build,promote,verify',
+function validateGraph(workflow, jobs, build, verify, promote, errors) {
+  fail(errors, sameKeys(jobs, ['build', 'verify', 'promote']),
     'graph: workflow needs exactly build, verify, and promote jobs');
   fail(errors, !hasOwn(build, 'needs'), 'graph: build must not need another job');
   fail(errors, verify.needs === 'build', 'graph: verify must need exactly build');
@@ -76,16 +71,20 @@ export function validateWorkflow(workflow) {
   'graph: promote must directly need exactly build and verify');
   fail(errors, isObject(workflow?.permissions) && Object.keys(workflow.permissions).length === 0,
     'permissions: workflow root must remain empty');
+}
 
+function validateJobBoundaries(jobs, errors) {
   for (const [jobName, job] of Object.entries(jobs)) {
     fail(errors, !hasOwn(job, 'if') && !hasOwn(job, 'continue-on-error'),
       `bypass: ${jobName} job must not override if or continue-on-error`);
     for (const [index, step] of stepsOf(job).entries()) {
       fail(errors, !hasOwn(step, 'if') && !hasOwn(step, 'continue-on-error'),
-        `bypass: ${jobName} step ${index + 1} must not override if or continue-on-error`);
+      `bypass: ${jobName} step ${index + 1} must not override if or continue-on-error`);
     }
   }
+}
 
+function validateJobSetup(jobs, errors) {
   const expectedPermissions = {
     build: { contents: 'read', packages: 'write' },
     verify: { packages: 'read' },
@@ -125,7 +124,9 @@ export function validateWorkflow(workflow) {
       password: expectedLoginPassword[jobName]
     }), `login: ${jobName} needs exactly one pinned login with the scoped credential`);
   }
+}
 
+function validateInterface(workflow, promote, errors) {
   const workflowCall = workflow?.on?.workflow_call;
   const workflowOutputs = workflowCall?.outputs;
   fail(errors, workflowCall?.inputs?.platforms?.default === 'linux/amd64',
@@ -144,7 +145,9 @@ export function validateWorkflow(workflow) {
     fail(errors, compact(promote.outputs?.[name]) === compact(`\${{ steps.result.outputs.${name} }}`),
       `promote output ${name}: must map exactly steps.result.outputs.${name}`);
   }
+}
 
+function validateCanonicalRuns(jobs, errors) {
   const allRuns = runEntries(jobs);
   fail(errors, allRuns.length === Object.keys(canonicalRunJobs).length,
     'run scalar: exactly four canonical behavior scalars are required');
@@ -154,7 +157,9 @@ export function validateWorkflow(workflow) {
       && matches[0].step.shell === 'bash' && matches[0].step.run === canonicalRuns[id],
     `run scalar: ${id} must be the exact canonical scalar in jobs.${jobName}`);
   }
+}
 
+function validateBuild(workflow, jobs, build, errors) {
   const validation = runById(workflow, 'build', 'validate-inputs') ?? {};
   fail(errors, sameRecord(validation.env, {
     REGISTRY: '${{ inputs.registry }}',
@@ -197,7 +202,9 @@ export function validateWorkflow(workflow) {
   }), 'build outputs: canonical digest and reference must derive exactly from steps.build.outputs.digest');
   fail(errors, stepsOf(build).indexOf(validation) < stepsOf(build).indexOf(buildStep),
     'build: validation must run before the sole build');
+}
 
+function validateVerify(workflow, jobs, verify, errors) {
   fail(errors, sameRecord(verify.env, {
     IMAGE_REFERENCE: '${{ needs.build.outputs.image-reference }}'
   }), 'verify env: IMAGE_REFERENCE must derive exactly from needs.build.outputs.image-reference');
@@ -234,7 +241,9 @@ export function validateWorkflow(workflow) {
     && Object.entries(expectedArtifacts).every(([name, artifactPath]) => uploads.some(({ step }) =>
       sameRecord(step.with, { name, path: artifactPath, 'if-no-files-found': 'error' }))),
   'artifacts: verify must upload exactly the validated SPDX and SLSA predicate files');
+}
 
+function validatePromote(workflow, promote, errors) {
   fail(errors, sameRecord(promote.env, {
     IMAGE: '${{ inputs.image }}',
     DIGEST: '${{ needs.build.outputs.image-digest }}',
@@ -247,14 +256,34 @@ export function validateWorkflow(workflow) {
     'result: the output step must run after verified promotion');
   fail(errors, sameRecord(result?.env, { SBOM_ARTIFACT: 'sbom-${{ github.sha }}' }),
     'result: exact canonical SBOM artifact environment is required');
+}
+
+export function validateWorkflow(workflow) {
+  const errors = [];
+  const jobs = isObject(workflow?.jobs) ? workflow.jobs : {};
+  const build = jobs.build ?? {};
+  const verify = jobs.verify ?? {};
+  const promote = jobs.promote ?? {};
+
+  validateGraph(workflow, jobs, build, verify, promote, errors);
+  validateJobBoundaries(jobs, errors);
+  validateJobSetup(jobs, errors);
+  validateInterface(workflow, promote, errors);
+  validateCanonicalRuns(jobs, errors);
+  validateBuild(workflow, jobs, build, errors);
+  validateVerify(workflow, jobs, verify, errors);
+  validatePromote(workflow, promote, errors);
 
   return errors;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const target = process.argv[2];
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  if (process.argv.length !== 2) {
+    console.error('validator: does not accept paths');
+    process.exit(2);
+  }
   try {
-    const errors = validateWorkflow(parse(fs.readFileSync(target, 'utf8')));
+    const errors = validateWorkflow(parse(fs.readFileSync(productionWorkflowUrl, 'utf8')));
     if (errors.length) {
       console.error(errors.join('\n'));
       process.exitCode = 1;
