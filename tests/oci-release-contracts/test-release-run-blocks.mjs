@@ -201,6 +201,12 @@ const sbomValid = fixture('sbom-valid.json', {
 });
 const sbomWrong = fixture('sbom-wrong.json', { SPDXID: 'not-a-document', spdxVersion: 'SPDX-2.3' });
 const provenanceValid = fixture('provenance-valid.json', {
+  buildDefinition: {
+    buildType: 'https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md'
+  },
+  runDetails: { builder: { id: 'https://github.com/moby/buildkit' } }
+});
+const provenanceObsoleteBuildType = fixture('provenance-obsolete-build-type.json', {
   buildDefinition: { buildType: 'https://mobyproject.org/buildkit@v1' },
   runDetails: { builder: { id: 'https://github.com/moby/buildkit' } }
 });
@@ -254,6 +260,7 @@ test('attestation scalar exports and validates the root, SPDX, and SLSA predicat
     ['wrong platform', verifyEnvironment(rootWrongPlatform)],
     ['extra runnable', verifyEnvironment(rootExtraRunnable)],
     ['wrong SPDX', verifyEnvironment(rootValid, sbomWrong)],
+    ['obsolete BuildKit build type', verifyEnvironment(rootValid, sbomValid, provenanceObsoleteBuildType)],
     ['wrong SLSA', verifyEnvironment(rootValid, sbomValid, provenanceWrong)]
   ]) {
     const caseDirectory = fs.mkdtempSync(path.join(temporary, 'verify-invalid-'));

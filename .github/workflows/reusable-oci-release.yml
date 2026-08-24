@@ -175,7 +175,7 @@ jobs:
               raise SystemExit("invalid SPDX predicate")
           with open("provenance.slsa.json", encoding="utf-8") as handle:
               provenance = json.load(handle)
-          if provenance.get("buildDefinition", {}).get("buildType") != "https://mobyproject.org/buildkit@v1" or not isinstance(provenance.get("runDetails", {}).get("builder", {}).get("id"), str):
+          if provenance.get("buildDefinition", {}).get("buildType") != "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md" or not isinstance(provenance.get("runDetails", {}).get("builder", {}).get("id"), str):
               raise SystemExit("invalid SLSA predicate")
           PY
       - name: Upload validated SPDX SBOM
