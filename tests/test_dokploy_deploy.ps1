@@ -85,6 +85,14 @@ if [[ "$endpoint" == /application.* || "$endpoint" == /deployment.* ]]; then
     printf 'fake curl rejected API method\n' >&2
     exit 92
   }
+  [[ "$follow_redirects" == false && "$max_redirs" == 0 ]] || {
+    printf 'fake curl rejected API redirect settings\n' >&2
+    exit 95
+  }
+  [[ -z "$output_path" && "$write_out" == $'\n%{http_code}' ]] || {
+    printf 'fake curl rejected API response capture\n' >&2
+    exit 98
+  }
   api_key_headers=0
   content_type_headers=0
   for header in "${headers[@]}"; do
@@ -125,7 +133,7 @@ case "$endpoint" in
     printf '%s' "$count" > "$count_file"
     printf 'deployment.all\n' >> "$FAKE_CURL_STATE/requests"
     case "$FAKE_CURL_SCENARIO:$count" in
-      success:1|unrelated-newer:1|new-error:1|cancelled:1|timeout:1|health-failure:1|redirect-301:1|redirect-302:1|old-revision:1)
+      success:1|unrelated-newer:1|new-error:1|cancelled:1|timeout:1|health-failure:1|redirect-301:1|redirect-302:1|old-revision:1|update-redirect-301:1|deploy-redirect-302:1)
         printf '[{"deploymentId":"previous-deployment","title":"Previous release","status":"done","log":"API_RESPONSE_SECRET"}]'
         ;;
       prior-reuse:1)
@@ -155,7 +163,7 @@ case "$endpoint" in
       health-failure:*)
         printf '[{"deploymentId":"new-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
         ;;
-      redirect-301:*|redirect-302:*|old-revision:*)
+      redirect-301:*|redirect-302:*|old-revision:*|update-redirect-301:*|deploy-redirect-302:*)
         printf '[{"deploymentId":"new-deployment","title":"%s","status":"done","log":"API_RESPONSE_SECRET"}]' "$FAKE_EXPECTED_TITLE"
         ;;
       prior-reuse:*)
@@ -169,14 +177,47 @@ case "$endpoint" in
         exit 90
         ;;
     esac
+    if [[ -n "$write_out" ]]; then
+      [[ "$write_out" == $'\n%{http_code}' ]] || {
+        printf 'fake curl rejected API response capture\n' >&2
+        exit 98
+      }
+      printf '\n200'
+    fi
     ;;
   /application.update)
     printf 'application.update %s\n' "$body" >> "$FAKE_CURL_STATE/requests"
-    printf '{"ok":true,"detail":"API_RESPONSE_SECRET"}'
+    api_status=200
+    api_detail=API_RESPONSE_SECRET
+    if [[ "$FAKE_CURL_SCENARIO" == update-redirect-301 ]]; then
+      api_status=301
+      api_detail=UPDATE_REDIRECT_RESPONSE_SECRET
+    fi
+    printf '{"ok":true,"detail":"%s"}' "$api_detail"
+    if [[ -n "$write_out" ]]; then
+      [[ "$write_out" == $'\n%{http_code}' ]] || {
+        printf 'fake curl rejected API response capture\n' >&2
+        exit 98
+      }
+      printf '\n%s' "$api_status"
+    fi
     ;;
   /application.deploy)
     printf 'application.deploy %s\n' "$body" >> "$FAKE_CURL_STATE/requests"
-    printf '{"queued":true,"detail":"API_RESPONSE_SECRET"}'
+    api_status=200
+    api_detail=API_RESPONSE_SECRET
+    if [[ "$FAKE_CURL_SCENARIO" == deploy-redirect-302 ]]; then
+      api_status=302
+      api_detail=DEPLOY_REDIRECT_RESPONSE_SECRET
+    fi
+    printf '{"queued":true,"detail":"%s"}' "$api_detail"
+    if [[ -n "$write_out" ]]; then
+      [[ "$write_out" == $'\n%{http_code}' ]] || {
+        printf 'fake curl rejected API response capture\n' >&2
+        exit 98
+      }
+      printf '\n%s' "$api_status"
+    fi
     ;;
   *)
     printf 'health\n' >> "$FAKE_CURL_STATE/requests"
@@ -329,6 +370,18 @@ try {
   $unrelatedNewer = Invoke-DeployScenario -Scenario unrelated-newer
   Assert-True ($unrelatedNewer.ExitCode -eq 0) "Unrelated newer deployment disrupted correlation: $($unrelatedNewer.Output)"
   Assert-True (($unrelatedNewer.Requests -join ',') -eq 'deployment.all,application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},application.deploy {"applicationId":"app_123-ABC","title":"github:example/saas:123456:2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},deployment.all,deployment.all,health') 'An unrelated newer done deployment must not satisfy the correlated poll'
+
+  $updateRedirect = Invoke-DeployScenario -Scenario update-redirect-301
+  Assert-True ($updateRedirect.ExitCode -ne 0) 'Application update HTTP 301 must fail'
+  Assert-True (($updateRedirect.Requests -join ',') -eq 'deployment.all,application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}') 'Application update redirect must stop before deploy, poll, or health'
+  Assert-True ($updateRedirect.Output -match 'exact HTTP 200') 'Application update redirect must report an exact-200 failure'
+  Assert-True ($updateRedirect.Output -notmatch 'UPDATE_REDIRECT_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Application update redirect leaked its body or API key'
+
+  $deployRedirect = Invoke-DeployScenario -Scenario deploy-redirect-302
+  Assert-True ($deployRedirect.ExitCode -ne 0) 'Application deploy HTTP 302 must fail'
+  Assert-True (($deployRedirect.Requests -join ',') -eq 'deployment.all,application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},application.deploy {"applicationId":"app_123-ABC","title":"github:example/saas:123456:2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}') 'Application deploy redirect must stop before poll or health'
+  Assert-True ($deployRedirect.Output -match 'exact HTTP 200') 'Application deploy redirect must report an exact-200 failure'
+  Assert-True ($deployRedirect.Output -notmatch 'DEPLOY_REDIRECT_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Application deploy redirect leaked its body or API key'
 
   $priorReuse = Invoke-DeployScenario -Scenario prior-reuse
   Assert-True ($priorReuse.ExitCode -ne 0) 'Prior deployment record must not be accepted as the queued deployment'

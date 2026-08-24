@@ -79,23 +79,31 @@ api_request() {
   local method="$1"
   local endpoint="$2"
   local body="${3:-}"
+  local exchange
   local response
+  local status
   local -a args=(
     --silent
     --show-error
-    --fail
     --request "$method"
     --connect-timeout 5
     --max-time 20
     --max-redirs 0
+    --write-out $'\n%{http_code}'
     --header "x-api-key: ${DOKPLOY_API_KEY}"
     --header 'Content-Type: application/json'
   )
   if [[ -n "$body" ]]; then
     args+=(--data "$body")
   fi
-  if ! response="$(curl "${args[@]}" "${dokploy_url}${endpoint}" 2>/dev/null)"; then
+  if ! exchange="$(curl "${args[@]}" "${dokploy_url}${endpoint}" 2>/dev/null)"; then
     printf 'Dokploy API request failed: %s\n' "$endpoint" >&2
+    return 1
+  fi
+  status="${exchange##*$'\n'}"
+  response="${exchange%$'\n'*}"
+  if [[ "$status" != 200 ]]; then
+    printf 'Dokploy API request did not return exact HTTP 200: %s\n' "$endpoint" >&2
     return 1
   fi
   printf '%s' "$response"
