@@ -2,9 +2,6 @@ name: Smoke additive OCI release
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - z/voice-cell-oci-release
 
 permissions: {}
 

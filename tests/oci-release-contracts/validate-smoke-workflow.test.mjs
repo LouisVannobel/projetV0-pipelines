@@ -20,6 +20,12 @@ test('the repository smoke caller proves the additive OCI release contract', () 
   assert.deepEqual(validateSmokeWorkflow(loadFixture(smokePath)), []);
 });
 
+test('the permanent smoke caller has no branch push trigger', () => {
+  const triggers = loadFixture(smokePath).on;
+  assert.deepEqual(Object.keys(triggers), ['workflow_dispatch']);
+  assert.equal(Object.hasOwn(triggers, 'push'), false);
+});
+
 test('the exact scratch smoke fixture ends with a numeric non-root identity', () => {
   assert.equal(fs.readFileSync(fixtureDockerfilePath, 'utf8').replaceAll('\r\n', '\n'), [
     'FROM scratch',
