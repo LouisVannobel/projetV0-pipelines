@@ -350,6 +350,10 @@ test('digest-mismatched or malformed attestation and statement subject mismatch 
   assert.notEqual(execute(wrongLink).status, 0, 'wrong root linkage');
   const wrongType = createFixtures('wrong-artifact-type', { artifactType: 'application/example' });
   assert.notEqual(execute(wrongType).status, 0, 'wrong attestation artifact type');
+  const wrongManifestSubject = createFixtures('wrong-attestation-subject', {
+    attestationSubjectDigest: `sha256:${'6'.repeat(64)}`
+  });
+  assert.notEqual(execute(wrongManifestSubject).status, 0, 'wrong attestation manifest subject');
   const wrongSubject = createFixtures('wrong-statement-subject', {
     statementSubjectDigest: '8'.repeat(64)
   });
