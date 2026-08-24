@@ -106,16 +106,16 @@ $gateMatch = [regex]::Match($saasCi, '(?ms)^  gate:\s*$.*?(?=^  \w[^\r\n]*:\s*$|
 if (-not $gateMatch.Success) { throw 'Reusable SaaS CI must expose a gate job' }
 $gate = $gateMatch.Value
 if ($gate -notmatch '(?m)^    name:\s*CI / gate\s*$') { throw 'SaaS gate must be named CI / gate' }
-if ($gate -notmatch '(?m)^    if:\s*\$\{\{\s*always\(\)') { throw 'SaaS gate must run under always()' }
+if ($gate -notmatch '(?m)^    if:\s*\$\{\{\s*always\(\)\s*\}\}\s*$') { throw 'SaaS gate must run unconditionally under always()' }
 foreach ($requiredJob in @('secrets-and-source', 'quality', 'accessibility', 'lighthouse', 'container')) {
   if ($gate -notmatch [regex]::Escape($requiredJob)) { throw "SaaS gate must consume job: $requiredJob" }
 }
-if ($gate -notmatch "needs\.secrets-and-source\.result\s*==\s*'success'") { throw 'SaaS gate must require secrets-and-source success' }
-if ($gate -notmatch "needs\.quality\.result\s*==\s*'success'") { throw 'SaaS gate must require quality success' }
-foreach ($optionalJob in @('accessibility', 'lighthouse', 'container')) {
-  if ($gate -notmatch "needs\.$optionalJob\.result\s*==\s*'success'") { throw "SaaS gate must accept $optionalJob success" }
-  if ($gate -notmatch "needs\.$optionalJob\.result\s*==\s*'skipped'") { throw "SaaS gate must accept $optionalJob skipped" }
+foreach ($resultVariable in @('SECRETS_AND_SOURCE_RESULT', 'QUALITY_RESULT', 'ACCESSIBILITY_RESULT', 'LIGHTHOUSE_RESULT', 'CONTAINER_RESULT')) {
+  if ($gate -notmatch [regex]::Escape($resultVariable)) { throw "SaaS gate step must validate $resultVariable" }
 }
+if ($gate -notmatch '(?ms)case "\$SECRETS_AND_SOURCE_RESULT" in.*?success\) ;;.*?\*\).*?exit 1.*?esac') { throw 'SaaS gate must reject non-success required results' }
+if ($gate -notmatch '(?ms)case "\$QUALITY_RESULT" in.*?success\) ;;.*?\*\).*?exit 1.*?esac') { throw 'SaaS gate must reject non-success required results' }
+if ($gate -notmatch '(?ms)for result in "\$ACCESSIBILITY_RESULT" "\$LIGHTHOUSE_RESULT" "\$CONTAINER_RESULT"; do.*?case "\$result" in.*?success\|skipped\) ;;.*?\*\).*?exit 1.*?esac.*?done') { throw 'SaaS gate must reject non-success/non-skipped optional results' }
 if ($gate -match '(?i)permissions:.*(write|read-all)') { throw 'SaaS gate must not request write permissions' }
 
 $actionlintExe = $env:ACTIONLINT_EXE

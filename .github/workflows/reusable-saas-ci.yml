@@ -215,9 +215,31 @@ jobs:
 
   gate:
     name: CI / gate
-    if: ${{ always() && needs.secrets-and-source.result == 'success' && needs.quality.result == 'success' && (needs.accessibility.result == 'success' || needs.accessibility.result == 'skipped') && (needs.lighthouse.result == 'success' || needs.lighthouse.result == 'skipped') && (needs.container.result == 'success' || needs.container.result == 'skipped') }}
+    if: ${{ always() }}
     needs: [secrets-and-source, quality, accessibility, lighthouse, container]
     runs-on: ubuntu-24.04
     steps:
-      - name: Confirm required CI jobs passed
-        run: echo 'All required SaaS CI jobs passed or were skipped by configuration'
+      - name: Enforce CI dependency results
+        env:
+          SECRETS_AND_SOURCE_RESULT: ${{ needs.secrets-and-source.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          ACCESSIBILITY_RESULT: ${{ needs.accessibility.result }}
+          LIGHTHOUSE_RESULT: ${{ needs.lighthouse.result }}
+          CONTAINER_RESULT: ${{ needs.container.result }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          case "$SECRETS_AND_SOURCE_RESULT" in
+            success) ;;
+            *) echo "secrets-and-source result was $SECRETS_AND_SOURCE_RESULT"; exit 1 ;;
+          esac
+          case "$QUALITY_RESULT" in
+            success) ;;
+            *) echo "quality result was $QUALITY_RESULT"; exit 1 ;;
+          esac
+          for result in "$ACCESSIBILITY_RESULT" "$LIGHTHOUSE_RESULT" "$CONTAINER_RESULT"; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "optional CI result was $result"; exit 1 ;;
+            esac
+          done
