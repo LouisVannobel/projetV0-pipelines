@@ -114,10 +114,10 @@ export function validateExample(workflow) {
   const release = jobs.release ?? {};
   const consume = jobs.consume ?? {};
   const uses = release.uses ?? '';
-  const reviewedSha = 'f9227d74e2588fea69b91a68cc8aaac920397057';
+  const reviewedSha = 'ab75f5d71ceb1856fb6930f074bfd5e4505b7041';
   fail(errors, typeof uses === 'string'
     && uses === `LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@${reviewedSha}`,
-  'example: reusable workflow must use the frozen reviewed workflow SHA');
+  'example: reusable workflow must use the corrected immutable workflow SHA');
   fail(errors, consume.needs === 'release', 'example: consumer must need release');
   fail(errors, consume?.env?.IMAGE_DIGEST === '${{ needs.release.outputs.image-digest }}'
     && consume?.env?.IMAGE_REFERENCE === '${{ needs.release.outputs.image-reference }}'
