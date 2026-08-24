@@ -1,5 +1,39 @@
 $ErrorActionPreference = 'Stop'
 
+function ConvertTo-NormalizedLineEndingBytes {
+  param([Parameter(Mandatory)][byte[]]$Bytes)
+
+  $normalized = [System.Collections.Generic.List[byte]]::new()
+  for ($index = 0; $index -lt $Bytes.Length; $index++) {
+    if ($Bytes[$index] -eq 13 -and $index + 1 -lt $Bytes.Length -and $Bytes[$index + 1] -eq 10) {
+      $normalized.Add(10)
+      $index++
+      continue
+    }
+    $normalized.Add($Bytes[$index])
+  }
+  return $normalized.ToArray()
+}
+
+function Get-GitBlobBytes {
+  param([Parameter(Mandatory)][string]$RevisionPath)
+
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = 'git'
+  $startInfo.UseShellExecute = $false
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $null = $startInfo.ArgumentList.Add('show')
+  $null = $startInfo.ArgumentList.Add($RevisionPath)
+  $process = [System.Diagnostics.Process]::Start($startInfo)
+  $output = [System.IO.MemoryStream]::new()
+  $process.StandardOutput.BaseStream.CopyTo($output)
+  $error = $process.StandardError.ReadToEnd()
+  $process.WaitForExit()
+  if ($process.ExitCode -ne 0) { throw "Unable to read pinned helper '$RevisionPath': $error" }
+  return $output.ToArray()
+}
+
 $workflows = @(
   '.github\workflows\reusable-saas-ci.yml',
   '.github\workflows\reusable-container-release.yml',
@@ -244,6 +278,14 @@ foreach ($requiredCallerPermission in @('contents: read', 'packages: write', 'id
 }
 if ($containerReleaseCallerJob -match '(?m)^ {4}secrets:\s*(inherit\s*$|$)' -or $containerReleaseCallerJob -match '(?m)^ {6}DOKPLOY_API_KEY:\s*') {
   throw 'The production release caller must not pass Dokploy secrets to the reusable workflow'
+}
+
+$releaseExamplePin = [regex]::Match($containerReleaseExample, '(?m)^ {4}uses:\s+LouisVannobel/projetV0-pipelines/\.github/workflows/reusable-container-release\.yml@(?<sha>[0-9a-f]{40})\s+#\s+v\d+\.\d+\.\d+\s*$')
+if (-not $releaseExamplePin.Success) { throw 'The container release example must expose its immutable full SHA' }
+$pinnedHelper = ConvertTo-NormalizedLineEndingBytes (Get-GitBlobBytes "$($releaseExamplePin.Groups['sha'].Value):scripts/deploy-dokploy.sh")
+$currentHelper = ConvertTo-NormalizedLineEndingBytes ([System.IO.File]::ReadAllBytes((Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts/deploy-dokploy.sh')))
+if ([Convert]::ToBase64String($pinnedHelper) -ne [Convert]::ToBase64String($currentHelper)) {
+  throw 'The container release example must pin the exact behavior-tested Dokploy helper'
 }
 
 $readme = Get-Content -Raw -LiteralPath 'README.md'
