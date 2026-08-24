@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test, { after } from 'node:test';
@@ -12,19 +11,23 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
 const workflowPath = path.join(root, '.github', 'workflows', 'reusable-oci-release.yml');
 const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
-const temporary = fs.mkdtempSync(path.join(root, '.tmp-release-run-blocks-'));
-const scriptsDirectory = path.join(temporary, 'scalars');
-fs.mkdirSync(scriptsDirectory);
-after(() => fs.rmSync(temporary, { recursive: true, force: true }));
 const bashExecutable = process.platform === 'win32'
   ? 'C:/Program Files/Git/bin/bash.exe'
   : '/usr/bin/bash';
 assert.equal(fs.existsSync(bashExecutable), true, `fixed Bash exists at ${bashExecutable}`);
 const pythonExecutable = process.platform === 'win32'
-  ? path.join(os.homedir(), '.cache', 'codex-runtimes', 'codex-primary-runtime',
-    'dependencies', 'python', 'python.exe').replaceAll('\\', '/')
+  ? process.env.OCI_TEST_PYTHON3
   : '/usr/bin/python3';
+if (process.platform === 'win32') {
+  assert.equal(typeof pythonExecutable, 'string',
+    'OCI_TEST_PYTHON3 is required; run tests/test_oci_release_contracts.ps1 or set an explicit Python path');
+  assert.equal(path.isAbsolute(pythonExecutable), true, 'OCI_TEST_PYTHON3 must be an absolute path');
+}
 assert.equal(fs.existsSync(pythonExecutable), true, `fixed Python exists at ${pythonExecutable}`);
+const temporary = fs.mkdtempSync(path.join(root, '.tmp-release-run-blocks-'));
+const scriptsDirectory = path.join(temporary, 'scalars');
+fs.mkdirSync(scriptsDirectory);
+after(() => fs.rmSync(temporary, { recursive: true, force: true }));
 
 const expectedRuns = {
   'validate-inputs': 'build',
@@ -133,7 +136,11 @@ if [[ -n "\${PROVENANCE_FIXTURE_REL:-}" ]]; then export PROVENANCE_FIXTURE="$roo
 if [[ -n "\${GITHUB_OUTPUT_REL:-}" ]]; then export GITHUB_OUTPUT="$root/$GITHUB_OUTPUT_REL"; fi
 ${dockerFunction}
 export PYTHON_EXECUTABLE="$5"
-python3() { "$PYTHON_EXECUTABLE" "$@" | /usr/bin/tr -d '\\r'; }
+if [[ "$6" == win32 ]]; then
+  python3() { "$PYTHON_EXECUTABLE" "$@" | /usr/bin/tr -d '\\r'; }
+else
+  python3() { /usr/bin/python3 "$@"; }
+fi
 export -f docker python3
 "$4" "$root/$3"
 `);
@@ -145,7 +152,7 @@ function execute(id, environment = {}, workingDirectory = root) {
     .join('\n'));
   return spawnSync(bashExecutable, [
     relative(runner), relative(environmentFile), relative(workingDirectory), relative(scriptPaths[id]),
-    bashExecutable, pythonExecutable
+    bashExecutable, pythonExecutable, process.platform
   ], {
     cwd: root,
     encoding: 'utf8'

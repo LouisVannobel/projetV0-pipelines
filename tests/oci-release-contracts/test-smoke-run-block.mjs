@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test, { after } from 'node:test';
@@ -16,20 +15,23 @@ const inspectSteps = (workflow.jobs?.evidence?.steps ?? [])
   .filter((step) => step.id === 'inspect-raw-oci' && typeof step.run === 'string');
 assert.equal(inspectSteps.length, 1, 'one production inspect-raw-oci scalar exists');
 const productionRun = inspectSteps[0].run;
-
-const temporary = fs.mkdtempSync(path.join(root, '.tmp-smoke-run-block-'));
-const fixturesDir = path.join(temporary, 'fixtures');
-fs.mkdirSync(fixturesDir);
-after(() => fs.rmSync(temporary, { recursive: true, force: true }));
 const bashExecutable = process.platform === 'win32'
   ? 'C:/Program Files/Git/bin/bash.exe'
   : '/usr/bin/bash';
 assert.equal(fs.existsSync(bashExecutable), true, `fixed Bash exists at ${bashExecutable}`);
 const pythonExecutable = process.platform === 'win32'
-  ? path.join(os.homedir(), '.cache', 'codex-runtimes', 'codex-primary-runtime',
-    'dependencies', 'python', 'python.exe').replaceAll('\\', '/')
+  ? process.env.OCI_TEST_PYTHON3
   : '/usr/bin/python3';
+if (process.platform === 'win32') {
+  assert.equal(typeof pythonExecutable, 'string',
+    'OCI_TEST_PYTHON3 is required; run tests/test_oci_release_contracts.ps1 or set an explicit Python path');
+  assert.equal(path.isAbsolute(pythonExecutable), true, 'OCI_TEST_PYTHON3 must be an absolute path');
+}
 assert.equal(fs.existsSync(pythonExecutable), true, `fixed Python exists at ${pythonExecutable}`);
+const temporary = fs.mkdtempSync(path.join(root, '.tmp-smoke-run-block-'));
+const fixturesDir = path.join(temporary, 'fixtures');
+fs.mkdirSync(fixturesDir);
+after(() => fs.rmSync(temporary, { recursive: true, force: true }));
 
 const relative = (target) => path.relative(root, target).replaceAll('\\', '/');
 const sha256 = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
@@ -241,7 +243,11 @@ export PROVENANCE_FIXTURE="$root/$PROVENANCE_FIXTURE_REL"
 cd "$root/$WORKING_DIRECTORY_REL"
 ${shellFakes}
 export PYTHON_EXECUTABLE="$4"
-python3() { "$PYTHON_EXECUTABLE" "$@" | /usr/bin/tr -d '\\r'; }
+if [[ "$5" == win32 ]]; then
+  python3() { "$PYTHON_EXECUTABLE" "$@" | /usr/bin/tr -d '\\r'; }
+else
+  python3() { /usr/bin/python3 "$@"; }
+fi
 export -f curl sha256sum tar python3
 "$3" "$root/$2"
 `);
@@ -286,7 +292,8 @@ function execute(fixtures, overrides = {}, runScalar = productionRun) {
     .map(([name, value]) => `export ${name}=${shellQuote(value)}`)
     .join('\n'));
   const result = spawnSync(bashExecutable, [
-    relative(runner), relative(environmentPath), relative(scalarPath), bashExecutable, pythonExecutable
+    relative(runner), relative(environmentPath), relative(scalarPath), bashExecutable, pythonExecutable,
+    process.platform
   ], { cwd: root, encoding: 'utf8' });
   return {
     ...result,
