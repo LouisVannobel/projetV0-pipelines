@@ -376,3 +376,9 @@ test('result scalar validates the digest and writes exactly three outputs', () =
   assert.notEqual(invalid.status, 0);
   assert.equal(fs.readFileSync(output, 'utf8'), '');
 });
+
+test('result scalar emits all outputs through one grouped append', () => {
+  const run = fs.readFileSync(scriptPaths.result, 'utf8');
+  assert.equal((run.match(/>>\s*"\$GITHUB_OUTPUT"/g) ?? []).length, 1);
+  assert.match(run, /\{[\s\S]*printf 'image-digest=%s\\n'[\s\S]*printf 'image-reference=%s@%s\\n'[\s\S]*printf 'sbom-artifact=%s\\n'[\s\S]*\}\s*>>\s*"\$GITHUB_OUTPUT"/);
+});

@@ -250,6 +250,8 @@ jobs:
           [[ "$IMAGE" =~ ^[a-z0-9]+([.-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)+$ ]]
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$SBOM_ARTIFACT" =~ ^sbom-[0-9a-f]{40}$ ]]
-          printf 'image-digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
-          printf 'image-reference=%s@%s\n' "$IMAGE" "$DIGEST" >> "$GITHUB_OUTPUT"
-          printf 'sbom-artifact=%s\n' "$SBOM_ARTIFACT" >> "$GITHUB_OUTPUT"
+          {
+            printf 'image-digest=%s\n' "$DIGEST"
+            printf 'image-reference=%s@%s\n' "$IMAGE" "$DIGEST"
+            printf 'sbom-artifact=%s\n' "$SBOM_ARTIFACT"
+          } >> "$GITHUB_OUTPUT"
