@@ -212,3 +212,12 @@ jobs:
           severity: 'HIGH,CRITICAL'
           ignore-unfixed: true
           exit-code: '1'
+
+  gate:
+    name: CI / gate
+    if: ${{ always() && needs.secrets-and-source.result == 'success' && needs.quality.result == 'success' && (needs.accessibility.result == 'success' || needs.accessibility.result == 'skipped') && (needs.lighthouse.result == 'success' || needs.lighthouse.result == 'skipped') && (needs.container.result == 'success' || needs.container.result == 'skipped') }}
+    needs: [secrets-and-source, quality, accessibility, lighthouse, container]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Confirm required CI jobs passed
+        run: echo 'All required SaaS CI jobs passed or were skipped by configuration'

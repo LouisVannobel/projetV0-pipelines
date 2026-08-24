@@ -96,6 +96,28 @@ if ($repositoryExample -notmatch '(?ms)^\s*with:\s*$.*^\s+run-infrastructure-sta
   throw 'The infrastructure example must enable repository-local static validation'
 }
 
+$saasExample = Get-Content -Raw -LiteralPath 'examples\saas-ci.yml'
+if ($saasExample -match '(?ms)^\s+with:\s*$') {
+  throw 'The SaaS example must rely on reusable workflow defaults and omit inputs'
+}
+
+$saasCi = Get-Content -Raw -LiteralPath '.github\workflows\reusable-saas-ci.yml'
+$gateMatch = [regex]::Match($saasCi, '(?ms)^  gate:\s*$.*?(?=^  \w[^\r\n]*:\s*$|\z)')
+if (-not $gateMatch.Success) { throw 'Reusable SaaS CI must expose a gate job' }
+$gate = $gateMatch.Value
+if ($gate -notmatch '(?m)^    name:\s*CI / gate\s*$') { throw 'SaaS gate must be named CI / gate' }
+if ($gate -notmatch '(?m)^    if:\s*\$\{\{\s*always\(\)') { throw 'SaaS gate must run under always()' }
+foreach ($requiredJob in @('secrets-and-source', 'quality', 'accessibility', 'lighthouse', 'container')) {
+  if ($gate -notmatch [regex]::Escape($requiredJob)) { throw "SaaS gate must consume job: $requiredJob" }
+}
+if ($gate -notmatch "needs\.secrets-and-source\.result\s*==\s*'success'") { throw 'SaaS gate must require secrets-and-source success' }
+if ($gate -notmatch "needs\.quality\.result\s*==\s*'success'") { throw 'SaaS gate must require quality success' }
+foreach ($optionalJob in @('accessibility', 'lighthouse', 'container')) {
+  if ($gate -notmatch "needs\.$optionalJob\.result\s*==\s*'success'") { throw "SaaS gate must accept $optionalJob success" }
+  if ($gate -notmatch "needs\.$optionalJob\.result\s*==\s*'skipped'") { throw "SaaS gate must accept $optionalJob skipped" }
+}
+if ($gate -match '(?i)permissions:.*(write|read-all)') { throw 'SaaS gate must not request write permissions' }
+
 $actionlintExe = $env:ACTIONLINT_EXE
 if ($actionlintExe) {
   if (-not (Test-Path -LiteralPath $actionlintExe)) { throw "actionlint executable not found: $actionlintExe" }
