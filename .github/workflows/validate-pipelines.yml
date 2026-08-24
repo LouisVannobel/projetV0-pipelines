@@ -21,6 +21,9 @@ jobs:
       - name: Test reusable workflow contracts
         shell: pwsh
         run: pwsh -File tests/test_pipeline_contracts.ps1
+      - name: Test private Dokploy deploy boundary
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/test_dokploy_deploy.ps1
       - name: Validate GitHub Actions syntax
         shell: bash
         run: |

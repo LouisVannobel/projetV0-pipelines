@@ -189,6 +189,42 @@ if ($containerRelease -match '(?im)(^|[^a-z])latest([^a-z]|$)') {
   throw 'Container release must not publish or scan a latest image tag'
 }
 
+if ($containerRelease -notmatch '(?ms)^ {4}secrets:\s*$.*?^ {6}DOKPLOY_API_KEY:\s*$.*?^ {8}required:\s*true\s*$') {
+  throw 'Container release must require a named Dokploy API key secret'
+}
+$releaseJob = [regex]::Match($containerRelease, '(?ms)^  release:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
+foreach ($requiredDeployControl in @(
+  'environment: production',
+  'id-token: write',
+  'tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3',
+  'oauth-client-id: ${{ vars.TS_WIF_CLIENT_ID }}',
+  'audience: ${{ vars.TS_WIF_AUDIENCE }}',
+  'tags: tag:deploy',
+  'repository: ${{ fromJSON(toJSON(job)).workflow_repository }}',
+  'ref: ${{ fromJSON(toJSON(job)).workflow_sha }}',
+  'DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}',
+  'DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}',
+  'HEALTH_URL: ${{ vars.HEALTH_URL }}',
+  'DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}',
+  'RELEASE_REF: ${{ env.RELEASE_REF }}',
+  'bash .pipeline-runtime/scripts/deploy-dokploy.sh'
+)) {
+  if ($releaseJob -notmatch [regex]::Escape($requiredDeployControl)) {
+    throw "Container release omits private deploy control: $requiredDeployControl"
+  }
+}
+$scanIndex = $releaseJob.IndexOf('aquasecurity/trivy-action@')
+$tailscaleIndex = $releaseJob.IndexOf('tailscale/github-action@')
+$deployIndex = $releaseJob.IndexOf('bash .pipeline-runtime/scripts/deploy-dokploy.sh')
+if ($scanIndex -lt 0 -or $tailscaleIndex -le $scanIndex -or $deployIndex -le $tailscaleIndex) {
+  throw 'Private Dokploy deployment must run through Tailscale only after the exact-digest Trivy scan'
+}
+
+$selfValidation = Get-Content -Raw -LiteralPath '.github\workflows\validate-pipelines.yml'
+if ($selfValidation -notmatch [regex]::Escape('pwsh -NoProfile -File tests/test_dokploy_deploy.ps1')) {
+  throw 'Pipeline validation must execute the real Dokploy deploy behavior tests'
+}
+
 $containerReleaseExample = Get-Content -Raw -LiteralPath 'examples\container-release.yml'
 if ($containerReleaseExample -notmatch '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\["main"\]') {
   throw 'The container release example must trigger on pushes to main'
