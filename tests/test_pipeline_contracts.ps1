@@ -1,5 +1,10 @@
 $ErrorActionPreference = 'Stop'
 
+$shellEol = (& git check-attr eol -- scripts/deploy-dokploy.sh) -join "`n"
+if ($LASTEXITCODE -ne 0 -or $shellEol -notmatch '(?m)^scripts/deploy-dokploy\.sh: eol: lf$') {
+  throw 'Shell entrypoints must stay LF in fresh Windows checkouts'
+}
+
 function ConvertTo-NormalizedLineEndingBytes {
   param([Parameter(Mandatory)][byte[]]$Bytes)
 
