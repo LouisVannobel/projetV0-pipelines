@@ -209,9 +209,22 @@ case "$endpoint" in
     printf 'application.update %s\n' "$body" >> "$FAKE_CURL_STATE/requests"
     api_status=200
     api_detail=API_RESPONSE_SECRET
-    if [[ "$FAKE_CURL_SCENARIO" == update-redirect-301 && "$count" -eq 1 ]]; then
-      api_status=301
-      api_detail=UPDATE_REDIRECT_RESPONSE_SECRET
+    if [[ "$count" -eq 1 ]]; then
+      case "$FAKE_CURL_SCENARIO" in
+        update-redirect-301)
+          api_status=301
+          api_detail=UPDATE_REDIRECT_RESPONSE_SECRET
+          ;;
+        update-server-error-500)
+          api_status=500
+          api_detail=UPDATE_SERVER_ERROR_RESPONSE_SECRET
+          ;;
+        update-lost-response)
+          printf 'UPDATE_LOST_RESPONSE_SECRET'
+          printf 'UPDATE_LOST_RESPONSE_SECRET' >&2
+          exit 22
+          ;;
+      esac
     elif [[ "$FAKE_CURL_SCENARIO" == recovery-failure && "$count" -gt 1 ]]; then
       api_status=500
       api_detail=RECOVERY_RESPONSE_SECRET
@@ -439,10 +452,17 @@ try {
   Assert-True ($unrelatedNewer.ExitCode -eq 0) "Unrelated newer deployment disrupted correlation: $($unrelatedNewer.Output)"
   Assert-True (($unrelatedNewer.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, 'deployment.all', 'deployment.all', 'health') -join ',')) 'An unrelated newer done deployment must not satisfy the correlated poll'
 
-  $updateRedirect = Invoke-DeployScenario -Scenario update-redirect-301
-  Assert-True ($updateRedirect.ExitCode -ne 0) 'Application update HTTP 301 must fail'
-  Assert-True (($updateRedirect.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate) -join ',')) 'Initial update failure must not deploy or restore'
-  Assert-True ($updateRedirect.Output -notmatch 'UPDATE_REDIRECT_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Application update redirect leaked its body or API key'
+  foreach ($ambiguousUpdateFailure in @(
+    @{ Scenario = 'update-redirect-301'; Message = 'application.update'; Secret = 'UPDATE_REDIRECT_RESPONSE_SECRET' },
+    @{ Scenario = 'update-server-error-500'; Message = 'application.update'; Secret = 'UPDATE_SERVER_ERROR_RESPONSE_SECRET' },
+    @{ Scenario = 'update-lost-response'; Message = 'Dokploy API request failed: /application.update'; Secret = 'UPDATE_LOST_RESPONSE_SECRET' }
+  )) {
+    $updateFailure = Invoke-DeployScenario -Scenario $ambiguousUpdateFailure.Scenario
+    Assert-True ($updateFailure.ExitCode -ne 0) "Ambiguous application update '$($ambiguousUpdateFailure.Scenario)' must fail"
+    Assert-True ($updateFailure.Output -match [regex]::Escape($ambiguousUpdateFailure.Message)) "Ambiguous application update '$($ambiguousUpdateFailure.Scenario)' must preserve its original failure"
+    Assert-True (($updateFailure.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $restoreUpdate) -join ',')) "Ambiguous application update '$($ambiguousUpdateFailure.Scenario)' must restore exactly once without deploy/poll/health"
+    Assert-True ($updateFailure.Output -notmatch "$($ambiguousUpdateFailure.Secret)|DOKPLOY_API_KEY_SECRET") "Ambiguous application update '$($ambiguousUpdateFailure.Scenario)' leaked its body or API key"
+  }
 
   foreach ($deployFailureScenario in @('deploy-redirect-302', 'deploy-post-failure')) {
     $deployFailure = Invoke-DeployScenario -Scenario $deployFailureScenario

@@ -291,8 +291,8 @@ if [[ "$previous" != '__NONE__' ]]; then
 fi
 
 trap recover_desired_image EXIT
-api_request POST '/application.update' "$desired_update_body" >/dev/null || exit 1
 recovery_armed=true
+api_request POST '/application.update' "$desired_update_body" >/dev/null || exit 1
 
 deploy_body="{\"applicationId\":\"${DOKPLOY_APPLICATION_ID}\",\"title\":\"${deployment_title}\"}"
 api_request POST '/application.deploy' "$deploy_body" >/dev/null || exit 1
