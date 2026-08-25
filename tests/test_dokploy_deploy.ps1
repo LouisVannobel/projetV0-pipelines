@@ -262,7 +262,7 @@ case "$endpoint" in
     count=$((count + 1))
     printf '%s' "$count" > "$count_file"
     printf 'health\n' >> "$FAKE_CURL_STATE/requests"
-    if [[ "$FAKE_CURL_SCENARIO" == health-failure || ("$FAKE_CURL_SCENARIO" == health-transient && "$count" -eq 1) ]]; then
+    if [[ "$FAKE_CURL_SCENARIO" == health-failure || ("$FAKE_CURL_SCENARIO" == health-transient && "$count" -eq 1) || ("$FAKE_CURL_SCENARIO" == healthy-then-unhealthy && "$count" -gt 1) ]]; then
       printf 'HEALTH_RESPONSE_SECRET'
       printf 'HEALTH_RESPONSE_SECRET' >&2
       exit 22
@@ -335,7 +335,8 @@ function Invoke-DeployScenario {
     [string]$PreflightMaxAttempts = '3',
     [string]$PreflightRetrySeconds = '0',
     [string]$HealthMaxAttempts = '3',
-    [string]$HealthRetrySeconds = '0'
+    [string]$HealthRetrySeconds = '0',
+    [string]$HealthSuccessChecks = '2'
   )
 
   Remove-Item -LiteralPath (Join-Path $stateDir 'requests') -Force -ErrorAction SilentlyContinue
@@ -360,11 +361,12 @@ function Invoke-DeployScenario {
     DOKPLOY_DEPLOY_POLL_SECONDS = '0'
     DOKPLOY_HEALTH_MAX_ATTEMPTS = $HealthMaxAttempts
     DOKPLOY_HEALTH_RETRY_SECONDS = $HealthRetrySeconds
+    DOKPLOY_HEALTH_SUCCESS_CHECKS = $HealthSuccessChecks
     FAKE_CURL_SCENARIO = $Scenario
     FAKE_CURL_STATE = $bashStateDir
     FAKE_EXPECTED_TITLE = 'github:example/saas:123456:2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     BASH_ENV = $bashBashEnvPath
-    WSLENV = 'DOKPLOY_URL:DOKPLOY_API_KEY:DOKPLOY_APPLICATION_ID:RELEASE_REF:HEALTH_URL:GITHUB_REPOSITORY:GITHUB_RUN_ID:GITHUB_RUN_ATTEMPT:EXPECTED_REVISION:DOKPLOY_PREFLIGHT_MAX_ATTEMPTS:DOKPLOY_PREFLIGHT_RETRY_SECONDS:DOKPLOY_DEPLOY_MAX_POLLS:DOKPLOY_DEPLOY_POLL_SECONDS:DOKPLOY_HEALTH_MAX_ATTEMPTS:DOKPLOY_HEALTH_RETRY_SECONDS:FAKE_CURL_SCENARIO:FAKE_CURL_STATE:FAKE_EXPECTED_TITLE:BASH_ENV'
+    WSLENV = 'DOKPLOY_URL:DOKPLOY_API_KEY:DOKPLOY_APPLICATION_ID:RELEASE_REF:HEALTH_URL:GITHUB_REPOSITORY:GITHUB_RUN_ID:GITHUB_RUN_ATTEMPT:EXPECTED_REVISION:DOKPLOY_PREFLIGHT_MAX_ATTEMPTS:DOKPLOY_PREFLIGHT_RETRY_SECONDS:DOKPLOY_DEPLOY_MAX_POLLS:DOKPLOY_DEPLOY_POLL_SECONDS:DOKPLOY_HEALTH_MAX_ATTEMPTS:DOKPLOY_HEALTH_RETRY_SECONDS:DOKPLOY_HEALTH_SUCCESS_CHECKS:FAKE_CURL_SCENARIO:FAKE_CURL_STATE:FAKE_EXPECTED_TITLE:BASH_ENV'
   }
   foreach ($name in $values.Keys) {
     $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -426,7 +428,9 @@ try {
     (Invoke-DeployScenario -Scenario success -PreflightMaxAttempts '0'),
     (Invoke-DeployScenario -Scenario success -PreflightRetrySeconds '-1'),
     (Invoke-DeployScenario -Scenario success -HealthMaxAttempts '0'),
-    (Invoke-DeployScenario -Scenario success -HealthRetrySeconds '-1')
+    (Invoke-DeployScenario -Scenario success -HealthRetrySeconds '-1'),
+    (Invoke-DeployScenario -Scenario success -HealthSuccessChecks '0'),
+    (Invoke-DeployScenario -Scenario success -HealthSuccessChecks '4')
   )) {
     Assert-True ($invalidBound.ExitCode -ne 0) 'Invalid retry/poll bound must fail'
     Assert-True ($invalidBound.Requests.Count -eq 0) 'Invalid retry/poll bound must fail before any request'
@@ -462,7 +466,7 @@ try {
 
   $success = Invoke-DeployScenario -Scenario success
   Assert-True ($success.ExitCode -eq 0) "Successful deployment failed: $($success.Output)"
-  Assert-True (($success.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, 'deployment.all', 'deployment.all', 'deployment.all', 'health') -join ',')) 'Deployment requests were not issued in preflight/snapshot/update/deploy/poll/health order'
+  Assert-True (($success.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, 'deployment.all', 'deployment.all', 'deployment.all', 'health', 'health') -join ',')) 'Deployment requests were not issued in preflight/snapshot/update/deploy/poll/health-soak order'
   Assert-True (@($success.Requests | Where-Object { $_ -like 'application.update *' }).Count -eq 1) 'Successful deployment must not restore the prior image'
   Assert-True (($success.Requests -join ',') -notmatch 'username|password|registry|DOKPLOY_API_KEY_SECRET') 'Success request trace leaked credentials'
   Assert-True ($success.Output -eq 'DOKPLOY_DEPLOY_OK application=app_123-ABC image=ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') 'Success output must be exact and minimal'
@@ -470,7 +474,7 @@ try {
 
   $unrelatedNewer = Invoke-DeployScenario -Scenario unrelated-newer
   Assert-True ($unrelatedNewer.ExitCode -eq 0) "Unrelated newer deployment disrupted correlation: $($unrelatedNewer.Output)"
-  Assert-True (($unrelatedNewer.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, 'deployment.all', 'deployment.all', 'health') -join ',')) 'An unrelated newer done deployment must not satisfy the correlated poll'
+  Assert-True (($unrelatedNewer.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, 'deployment.all', 'deployment.all', 'health', 'health') -join ',')) 'An unrelated newer done deployment must not satisfy the correlated poll'
 
   foreach ($ambiguousUpdateFailure in @(
     @{ Scenario = 'update-redirect-301'; Message = 'application.update'; Secret = 'UPDATE_REDIRECT_RESPONSE_SECRET' },
@@ -504,7 +508,7 @@ try {
     Assert-True (@($failed.Requests | Where-Object { $_ -like 'application.deploy *' }).Count -eq 2) "Deployment failure '$($terminalFailure.Scenario)' must issue only the original and recovery deploy POSTs"
   }
 
-  foreach ($healthFailureScenario in @('health-failure', 'redirect-301', 'redirect-302', 'invalid-health-json', 'old-revision')) {
+  foreach ($healthFailureScenario in @('health-failure', 'healthy-then-unhealthy', 'redirect-301', 'redirect-302', 'invalid-health-json', 'old-revision')) {
     $healthFailed = Invoke-DeployScenario -Scenario $healthFailureScenario
     Assert-True ($healthFailed.ExitCode -ne 0) "Health convergence '$healthFailureScenario' must exhaust and fail"
     Assert-True ($healthFailed.Output -match 'did not converge') "Health convergence '$healthFailureScenario' must report exhaustion"
@@ -516,7 +520,7 @@ try {
   foreach ($healthRecoveryScenario in @('old-then-current', 'health-transient')) {
     $healthRecovered = Invoke-DeployScenario -Scenario $healthRecoveryScenario
     Assert-True ($healthRecovered.ExitCode -eq 0) "Health convergence '$healthRecoveryScenario' did not recover"
-    Assert-True (@($healthRecovered.Requests | Where-Object { $_ -eq 'health' }).Count -eq 2) "Health convergence '$healthRecoveryScenario' must stop on the matching revision"
+    Assert-True (@($healthRecovered.Requests | Where-Object { $_ -eq 'health' }).Count -eq 3) "Health convergence '$healthRecoveryScenario' must remain healthy for the configured consecutive checks"
     Assert-True (@($healthRecovered.Requests | Where-Object { $_ -like 'application.update *' }).Count -eq 1) "Health convergence '$healthRecoveryScenario' must not restore after success"
   }
 

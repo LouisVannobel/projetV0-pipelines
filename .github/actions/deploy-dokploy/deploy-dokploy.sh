@@ -73,12 +73,15 @@ max_polls="${DOKPLOY_DEPLOY_MAX_POLLS:-120}"
 poll_seconds="${DOKPLOY_DEPLOY_POLL_SECONDS:-5}"
 health_max_attempts="${DOKPLOY_HEALTH_MAX_ATTEMPTS:-12}"
 health_retry_seconds="${DOKPLOY_HEALTH_RETRY_SECONDS:-5}"
+health_success_checks="${DOKPLOY_HEALTH_SUCCESS_CHECKS:-7}"
 [[ "$preflight_max_attempts" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_PREFLIGHT_MAX_ATTEMPTS must be a positive integer'
 [[ "$preflight_retry_seconds" =~ ^[0-9]+$ ]] || fail 'DOKPLOY_PREFLIGHT_RETRY_SECONDS must be a non-negative integer'
 [[ "$max_polls" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_DEPLOY_MAX_POLLS must be a positive integer'
 [[ "$poll_seconds" =~ ^[0-9]+$ ]] || fail 'DOKPLOY_DEPLOY_POLL_SECONDS must be a non-negative integer'
 [[ "$health_max_attempts" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_HEALTH_MAX_ATTEMPTS must be a positive integer'
 [[ "$health_retry_seconds" =~ ^[0-9]+$ ]] || fail 'DOKPLOY_HEALTH_RETRY_SECONDS must be a non-negative integer'
+[[ "$health_success_checks" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_HEALTH_SUCCESS_CHECKS must be a positive integer'
+((health_success_checks <= health_max_attempts)) || fail 'DOKPLOY_HEALTH_SUCCESS_CHECKS must not exceed DOKPLOY_HEALTH_MAX_ATTEMPTS'
 
 dokploy_url="${DOKPLOY_URL%/}"
 release_digest="${RELEASE_REF##*@}"
@@ -336,16 +339,22 @@ done
 [[ "$deployment_done" == true ]] || fail 'Timed out waiting for a new Dokploy deployment'
 
 health_converged=false
+health_consecutive=0
 for ((attempt = 1; attempt <= health_max_attempts; attempt++)); do
   if health_matches_expected_revision; then
-    health_converged=true
-    break
+    health_consecutive=$((health_consecutive + 1))
+    if ((health_consecutive >= health_success_checks)); then
+      health_converged=true
+      break
+    fi
+  else
+    health_consecutive=0
   fi
   if ((attempt < health_max_attempts)); then
     sleep "$health_retry_seconds"
   fi
 done
-[[ "$health_converged" == true ]] || fail 'External health did not converge to expected revision'
+[[ "$health_converged" == true ]] || fail 'External health did not converge and remain healthy through stabilization window'
 
 recovery_armed=false
 trap - EXIT

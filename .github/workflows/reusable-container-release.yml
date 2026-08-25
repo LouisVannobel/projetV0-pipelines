@@ -63,15 +63,14 @@ jobs:
           context: ${{ inputs.docker-context }}
           file: ${{ inputs.dockerfile }}
           platforms: ${{ inputs.platforms }}
-          push: true
-          tags: ${{ steps.release-image.outputs.image }}:candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          outputs: type=image,name=${{ steps.release-image.outputs.image }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             APP_REVISION=${{ github.sha }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           provenance: mode=max
-          sbom: true
+          sbom: generator=docker/buildkit-syft-scanner:1.11.0@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Capture and validate published digest
