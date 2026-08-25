@@ -16,7 +16,7 @@ L'installation ou la mise à jour root du helper est une opération de plateform
 
 Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` et `examples/container-release.yml` vers `.github/workflows/release.yml`. Les deux workflows sont épinglés au même commit immuable :
 
-`72d22b0cec1dc4cab920e1be0778270985a1bc47` (`v1.4.0`)
+`3f385a4857ff7a85fcaa414296321154783272da` (`v1.4.0`)
 
 Le SaaS fournit `package.json`, `pnpm-lock.yaml`, un Dockerfile multi-stage et les scripts pnpm `lint`, `typecheck`, `test`, `build` et `test:a11y`. Lighthouse reste opt-in. La CI publie le statut requis `CI / gate`.
 
