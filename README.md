@@ -10,11 +10,13 @@ pwsh -File scripts/new-saas.ps1 invoice-ai
 
 Cette commande crée le dépôt privé depuis le template, une application Dokploy et une identité dédiée, applique les protections GitHub, puis attend la première release saine. Le profil standard est volontairement fixe : stateless, `ops01`, `/health`, 512 MiB, 1 CPU, sans domaine public, base, Redis ni stockage.
 
+L'installation ou la mise à jour root du helper est une opération de plateforme séparée : `pwsh -File scripts/install-studio-saas.ps1`. Elle ne fait pas partie de la création normale d'un SaaS.
+
 ## Appel depuis un SaaS
 
 Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` et `examples/container-release.yml` vers `.github/workflows/release.yml`. Les deux workflows sont épinglés au même commit immuable :
 
-`8e276dcb75360cf7a5542c4f36608d68c2e44c1f` (`v1.3.1`)
+`72d22b0cec1dc4cab920e1be0778270985a1bc47` (`v1.4.0`)
 
 Le SaaS fournit `package.json`, `pnpm-lock.yaml`, un Dockerfile multi-stage et les scripts pnpm `lint`, `typecheck`, `test`, `build` et `test:a11y`. Lighthouse reste opt-in. La CI publie le statut requis `CI / gate`.
 
