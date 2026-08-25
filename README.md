@@ -2,6 +2,14 @@
 
 Workflows GitHub Actions réutilisables pour les SaaS du studio.
 
+## Nouveau SaaS
+
+```powershell
+pwsh -File scripts/new-saas.ps1 invoice-ai
+```
+
+Cette commande crée le dépôt privé depuis le template, une application Dokploy et une identité dédiée, applique les protections GitHub, puis attend la première release saine. Le profil standard est volontairement fixe : stateless, `ops01`, `/health`, 512 MiB, 1 CPU, sans domaine public, base, Redis ni stockage.
+
 ## Appel depuis un SaaS
 
 Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` et `examples/container-release.yml` vers `.github/workflows/release.yml`. Les deux workflows sont épinglés au même commit immuable :

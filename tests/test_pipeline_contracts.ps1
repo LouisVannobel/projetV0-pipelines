@@ -327,6 +327,9 @@ $selfValidation = Get-Content -Raw -LiteralPath '.github\workflows\validate-pipe
 if ($selfValidation -notmatch [regex]::Escape('pwsh -NoProfile -File tests/test_dokploy_deploy.ps1')) {
   throw 'Pipeline validation must execute the real Dokploy deploy behavior tests'
 }
+if ($selfValidation -notmatch [regex]::Escape('pwsh -NoProfile -File tests/test_new_saas.ps1')) {
+  throw 'Pipeline validation must execute the SaaS bootstrap boundary tests'
+}
 
 $containerReleaseExample = Get-Content -Raw -LiteralPath 'examples\container-release.yml'
 if ($containerReleaseExample -notmatch '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\["main"\]') {
