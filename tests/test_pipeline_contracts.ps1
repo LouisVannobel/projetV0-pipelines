@@ -198,6 +198,9 @@ if ($saasExample -match '(?ms)^\s+with:\s*$') {
 }
 
 $saasCi = Get-Content -Raw -LiteralPath '.github\workflows\reusable-saas-ci.yml'
+if ($saasCi -notmatch '(?ms)^      run-lighthouse:\s*$.*?^        default:\s*false\s*$') {
+  throw 'Lighthouse must be opt-in because a one-run score is noisy and axe already gates accessibility'
+}
 $gateMatch = [regex]::Match($saasCi, '(?ms)^  gate:\s*$.*?(?=^  \w[^\r\n]*:\s*$|\z)')
 if (-not $gateMatch.Success) { throw 'Reusable SaaS CI must expose a gate job' }
 $gate = $gateMatch.Value
@@ -221,6 +224,7 @@ foreach ($requiredReleaseControl in @(
   'push: true',
   'sbom: true',
   'provenance: mode=max',
+  'tags: ${{ steps.release-image.outputs.image }}:candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}',
   'RELEASE_IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"',
   'RELEASE_DIGEST="${{ steps.build.outputs.digest }}"',
   'RELEASE_REF="${RELEASE_IMAGE}@${RELEASE_DIGEST}"',
@@ -233,6 +237,9 @@ foreach ($requiredReleaseControl in @(
 }
 if ($containerRelease -match '(?im)(^|[^a-z])latest([^a-z]|$)') {
   throw 'Container release must not publish or scan a latest image tag'
+}
+if ($containerRelease -match '(?m)^\s*tags:\s*\$\{\{ steps\.release-image\.outputs\.image \}\}:sha-') {
+  throw 'Container release must not expose its pre-scan candidate through a final-looking SHA tag'
 }
 
 if ($containerRelease -match '(?m)^ {6}DOKPLOY_API_KEY:\s*\r?$') {
@@ -316,11 +323,15 @@ $readme = Get-Content -Raw -LiteralPath 'README.md'
 foreach ($requiredDeploymentPrerequisite in @(
   'sourceType: docker',
   'identifiants de pull',
-  'GHCR privé',
-  'compte/API Dokploy dédié',
-  'permissions minimales',
+  'repository GHCR',
+  'identité CI non personnelle',
+  'révocable',
+  'limitée au projet, à l''environnement et aux services SaaS',
   'environnement GitHub `production`',
-  'protégé'
+  'branches protégées',
+  'FailureAction=rollback',
+  'Order=start-first',
+  'Parallelism=1'
 )) {
   if ($readme -notmatch [regex]::Escape($requiredDeploymentPrerequisite)) {
     throw "README omits deployment prerequisite: $requiredDeploymentPrerequisite"

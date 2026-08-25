@@ -22,7 +22,7 @@ on:
       run-lighthouse:
         description: Run the repository lighthouse script
         type: boolean
-        default: true
+        default: false
       run-container:
         description: Build and vulnerability-scan the production Dockerfile
         type: boolean

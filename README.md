@@ -6,19 +6,19 @@ Workflows GitHub Actions réutilisables pour les SaaS du studio.
 
 Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` et `examples/container-release.yml` vers `.github/workflows/release.yml`. Les deux workflows sont épinglés au même commit immuable :
 
-`8339f7f8349d4e9824ffe95a3941cd9b691c6135` (`v1.1.1`)
+`aab6ec7c6201881691e38bcfb13de99514bd6fb7` (`v1.1.2`)
 
-Le SaaS fournit `package.json`, `pnpm-lock.yaml`, un Dockerfile multi-stage et les scripts pnpm `lint`, `typecheck`, `test`, `build`, `test:a11y` et `lighthouse`. La CI exécute ces contrôles et publie le statut requis `CI / gate`.
+Le SaaS fournit `package.json`, `pnpm-lock.yaml`, un Dockerfile multi-stage et les scripts pnpm `lint`, `typecheck`, `test`, `build` et `test:a11y`. Lighthouse reste opt-in. La CI publie le statut requis `CI / gate`.
 
 ## Release
 
-Le push sur `main` construit une seule image GHCR, scanne ce digest immuable, puis déploie ce même digest via le tailnet Dokploy. Le caller accorde `contents: read`, `packages: write` et `id-token: write`.
+Le push sur `main` construit une seule image candidate GHCR au nom unique, scanne son digest immuable, puis déploie uniquement ce digest via le tailnet Dokploy. Le caller accorde `contents: read`, `packages: write` et `id-token: write`.
 
 Configurer les variables du dépôt `DOKPLOY_APPLICATION_ID`, `DOKPLOY_URL`, `HEALTH_URL`, `TS_WIF_CLIENT_ID` et `TS_WIF_AUDIENCE`, ainsi que `DOKPLOY_API_KEY` comme secret de l'environnement `production`. Aucun secret Dokploy n'est transmis par le caller.
 
-L'application Dokploy doit utiliser la source Docker (`sourceType: docker`) et les identifiants de pull du registre GHCR privé doivent être configurés directement dans Dokploy. Utiliser un compte/API Dokploy dédié à cette application, limité à ce service et aux permissions minimales `service:read/create` et `deployment:read/create`. L'environnement GitHub `production` doit être protégé par les règles d'approbation adaptées au studio.
+L'application Dokploy doit utiliser la source Docker (`sourceType: docker`) et déjà pointer vers le même repository GHCR que le caller. Les identifiants de pull privés sont configurés dans Dokploy. Utiliser une identité CI non personnelle, révocable et limitée au projet, à l'environnement et aux services SaaS. L'environnement GitHub `production` n'accepte que les branches protégées.
 
-`HEALTH_URL` doit converger sans redirection vers un HTTP 200 exact avec un JSON dont `revision` est le SHA déployé. Le workflow produit une provenance et un SBOM OCI, sans revendiquer de conformité SLSA formelle.
+`HEALTH_URL` doit converger sans redirection vers un HTTP 200 exact avec un JSON dont `revision` est le SHA déployé. Le service Swarm utilise `FailureAction=rollback`, `Order=start-first` et `Parallelism=1`. En cas d'échec, le helper redéploie aussi l'image précédente. Le workflow produit une provenance et un SBOM OCI, sans revendiquer de conformité SLSA formelle.
 
 ## Appel depuis un dépôt d'infrastructure
 

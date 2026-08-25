@@ -59,7 +59,7 @@ jobs:
           file: ${{ inputs.dockerfile }}
           platforms: ${{ inputs.platforms }}
           push: true
-          tags: ${{ steps.release-image.outputs.image }}:sha-${{ github.sha }}
+          tags: ${{ steps.release-image.outputs.image }}:candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           build-args: |
             APP_REVISION=${{ github.sha }}
           labels: |
