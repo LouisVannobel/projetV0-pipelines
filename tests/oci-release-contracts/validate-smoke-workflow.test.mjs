@@ -53,13 +53,13 @@ test('the separate OCI example exposes metadata but deploys only the digest refe
   assert.deepEqual(validateExample(loadFixture(examplePath)), []);
 });
 
-test('the OCI example accepts only the corrected immutable workflow revision', () => {
+test('the OCI example accepts only the serialized immutable workflow revision', () => {
   const example = loadFixture(examplePath);
   const corrected = structuredClone(example);
-  corrected.jobs.release.uses = 'LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@eff9cfbb1c66ed36a386f475d493ccf9daaed3c8';
+  corrected.jobs.release.uses = 'LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@97cf6d2c5348f202c232fd872c4d4592d430297b';
   assert.deepEqual(validateExample(corrected), []);
 
   const broken = structuredClone(example);
-  broken.jobs.release.uses = 'LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@f9227d74e2588fea69b91a68cc8aaac920397057';
-  assert.match(validateExample(broken).join('\n'), /corrected immutable workflow SHA/);
+  broken.jobs.release.uses = 'LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@eff9cfbb1c66ed36a386f475d493ccf9daaed3c8';
+  assert.match(validateExample(broken).join('\n'), /serialized immutable workflow SHA/);
 });
