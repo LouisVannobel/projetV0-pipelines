@@ -129,30 +129,27 @@ if ($pipelineContractsCheckout.Value -notmatch '(?m)^\s+fetch-depth:\s*0\s*$') {
 if ($selfValidation -notmatch [regex]::Escape('uses: ./.github/workflows/reusable-repository-ci.yml')) {
   throw 'The pipeline repository must execute its reusable repository CI locally before consumers depend on it'
 }
-$actionlintSelfActionIgnore = '^specifying action "\$/\.github/actions/deploy-dokploy" in invalid format because ref is missing\. available formats are "\{owner\}/\{repo\}@\{ref\}" or "\{owner\}/\{repo\}/\{path\}@\{ref\}"$'
 $actionlintQueueIgnore = '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
 function Test-ExactActionlintIgnores {
   param([Parameter(Mandatory)][string]$Workflow)
 
-  $selfAssignment = "self_action_ignore='$actionlintSelfActionIgnore'"
   $queueAssignment = "queue_ignore='$actionlintQueueIgnore'"
-  $ignoreInvocation = '-ignore "$self_action_ignore" -ignore "$queue_ignore"'
-  return @([regex]::Matches($Workflow, [regex]::Escape($selfAssignment))).Count -eq 1 `
-    -and @([regex]::Matches($Workflow, [regex]::Escape($queueAssignment))).Count -eq 1 `
-    -and @([regex]::Matches($Workflow, '(?<![A-Za-z0-9_-])-ignore(?:\s|$)')).Count -eq 2 `
-    -and @([regex]::Matches($Workflow, [regex]::Escape($ignoreInvocation))).Count -eq 1
+  return @([regex]::Matches($Workflow, [regex]::Escape($queueAssignment))).Count -eq 1 `
+    -and @([regex]::Matches($Workflow, '(?m)^\s*self_action_ignore=')).Count -eq 0 `
+    -and @([regex]::Matches($Workflow, '(?<![A-Za-z0-9_-])-ignore(?:\s|$)')).Count -eq 1 `
+    -and @([regex]::Matches($Workflow, '-ignore\s+"\$queue_ignore"')).Count -eq 1
 }
 foreach ($lintWorkflow in @($repositoryCi, $selfValidation)) {
   if (-not (Test-ExactActionlintIgnores -Workflow $lintWorkflow)) {
-    throw 'Actionlint must keep exactly the two anchored upstream-parser compatibility ignores'
+    throw 'Actionlint must keep only the anchored concurrency-queue parser compatibility ignore'
   }
   foreach ($invalidIgnoreMutation in @(
     $lintWorkflow.Replace("queue_ignore='$actionlintQueueIgnore'", ''),
     $lintWorkflow.Replace($actionlintQueueIgnore, $actionlintQueueIgnore.Replace('"queue"', '"queues"')),
-    $lintWorkflow.Replace('-ignore "$self_action_ignore" -ignore "$queue_ignore"', '-ignore "$self_action_ignore" -ignore "$queue_ignore" -ignore ".*"')
+    $lintWorkflow.Replace('-ignore "$queue_ignore"', '-ignore "$queue_ignore" -ignore ".*"')
   )) {
     if (Test-ExactActionlintIgnores -Workflow $invalidIgnoreMutation) {
-      throw 'Actionlint ignore contract accepted a missing, altered, or broader queue diagnostic ignore'
+      throw 'Actionlint ignore contract accepted a missing, altered, or broader diagnostic ignore'
     }
   }
 }
@@ -160,8 +157,12 @@ foreach ($lintWorkflow in @($repositoryCi, $selfValidation)) {
 foreach ($example in Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File) {
   $source = Get-Content -Raw -LiteralPath $example.FullName
   foreach ($call in [regex]::Matches($source, '(?m)^\s*uses:\s+([^\s]+)(?<comment>\s+#\s+v\d+\.\d+\.\d+)?\s*$')) {
-    if ($call.Groups[1].Value -notmatch '^LouisVannobel/projetV0-pipelines/.+@[0-9a-f]{40}$') {
-      throw "Example caller must use the personal Pro repository at an immutable SHA: $($call.Groups[1].Value)"
+    $use = $call.Groups[1].Value
+    if ($use -notmatch '@[0-9a-f]{40}$') {
+      throw "Example action must use an immutable full SHA: $use"
+    }
+    if ($use -match '/\.github/workflows/' -and $use -notmatch '^LouisVannobel/projetV0-pipelines/') {
+      throw "Example reusable workflow must use the personal Pro repository: $use"
     }
     if (-not $call.Groups['comment'].Success) {
       throw "Example caller must retain a semantic version comment for Renovate: $($call.Groups[1].Value)"
@@ -268,37 +269,46 @@ if ($containerRelease -match '(?m)^\s*tags:\s*\$\{\{ steps\.release-image\.outpu
   throw 'Container release must not expose its pre-scan candidate through a final-looking SHA tag'
 }
 
-if ($containerRelease -match '(?m)^ {6}DOKPLOY_API_KEY:\s*\r?$') {
-  throw 'Container release must read the Dokploy API key from its production environment, not workflow_call secrets'
+$containerWorkflowCall = [regex]::Match($containerRelease, '(?ms)^  workflow_call:\s*$.*?(?=^permissions:|^jobs:|\z)').Value
+foreach ($requiredWorkflowOutput in @{
+  'release-ref' = '(?ms)^ {6}release-ref:\s*$.*?^ {8}value:\s*\$\{\{\s*jobs\.release\.outputs\.release-ref\s*\}\}\s*$'
+  'digest' = '(?ms)^ {6}digest:\s*$.*?^ {8}value:\s*\$\{\{\s*jobs\.release\.outputs\.digest\s*\}\}\s*$'
+}.GetEnumerator()) {
+  if ($containerWorkflowCall -notmatch $requiredWorkflowOutput.Value) {
+    throw "Reusable container release omits safe workflow output: $($requiredWorkflowOutput.Key)"
+  }
+}
+if ($containerWorkflowCall -match '(?m)^\s+secrets:\s*$|\$\{\{\s*secrets\.') {
+  throw 'Reusable container release must not accept or expose deployment secrets'
 }
 $releaseJob = [regex]::Match($containerRelease, '(?ms)^  release:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
-foreach ($requiredDeployControl in @(
-  'environment: production',
-  'id-token: write',
-  'group: container-release-${{ github.repository }}-${{ vars.DOKPLOY_APPLICATION_ID }}',
-  'cancel-in-progress: false',
-  'tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3',
-  'oauth-client-id: ${{ vars.TS_WIF_CLIENT_ID }}',
-  'audience: ${{ vars.TS_WIF_AUDIENCE }}',
-  'tags: tag:deploy',
-  "uses: $/.github/actions/deploy-dokploy # NOSONAR: GitHub resolves $/ from this reusable workflow's exact ref.",
-  'DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}',
-  'DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}',
-  'HEALTH_URL: ${{ vars.HEALTH_URL }}',
-  'DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}',
-  'EXPECTED_REVISION: ${{ github.sha }}',
-  'RELEASE_REF: ${{ env.RELEASE_REF }}',
+foreach ($requiredReleaseOutput in @(
+  'release-ref: ${{ steps.release-artifact.outputs.release-ref }}',
+  'digest: ${{ steps.release-artifact.outputs.digest }}',
+  'id: release-artifact',
+  'printf ''release-ref=%s\n'' "$RELEASE_REF" >> "$GITHUB_OUTPUT"',
+  'printf ''digest=%s\n'' "$RELEASE_DIGEST" >> "$GITHUB_OUTPUT"',
   'APP_REVISION=${{ github.sha }}'
 )) {
-  if ($releaseJob -notmatch [regex]::Escape($requiredDeployControl)) {
-    throw "Container release omits private deploy control: $requiredDeployControl"
+  if ($releaseJob -notmatch [regex]::Escape($requiredReleaseOutput)) {
+    throw "Container release omits immutable caller output: $requiredReleaseOutput"
   }
 }
 if (@([regex]::Matches($releaseJob, '(?m)^\s+uses:\s+actions/checkout@')).Count -ne 1) {
   throw 'Container release must checkout only the caller repository'
 }
-if ($releaseJob -match '(?m)workflow_(repository|sha)|\.pipeline-runtime|scripts/deploy-dokploy\.sh') {
-  throw 'Container release must not checkout or invoke the deploy helper through a caller-token path'
+foreach ($forbiddenReusableDeployContext in @(
+  'environment: production',
+  'id-token: write',
+  'tailscale/github-action@',
+  'deploy-dokploy',
+  'DOKPLOY_',
+  'HEALTH_URL',
+  '${{ secrets.'
+)) {
+  if ($containerRelease -match [regex]::Escape($forbiddenReusableDeployContext)) {
+    throw "Reusable container release must not own caller production context: $forbiddenReusableDeployContext"
+  }
 }
 
 $deployAction = Get-Content -Raw -LiteralPath '.github\actions\deploy-dokploy\action.yml'
@@ -308,13 +318,6 @@ if ($deployAction -match '(?m)^inputs:|^\s+inputs:|^secrets:|^\s+secrets:') {
 if ($deployAction -notmatch '(?m)^\s+run:\s+bash "\$GITHUB_ACTION_PATH/deploy-dokploy\.sh"\s*$') {
   throw 'The deploy action must execute its co-located helper through GITHUB_ACTION_PATH'
 }
-$scanIndex = $releaseJob.IndexOf('aquasecurity/trivy-action@')
-$tailscaleIndex = $releaseJob.IndexOf('tailscale/github-action@')
-$deployIndex = $releaseJob.IndexOf('uses: $/.github/actions/deploy-dokploy')
-if ($scanIndex -lt 0 -or $tailscaleIndex -le $scanIndex -or $deployIndex -le $tailscaleIndex) {
-  throw 'Private Dokploy deployment must run through Tailscale only after the exact-digest Trivy scan'
-}
-
 $selfValidation = Get-Content -Raw -LiteralPath '.github\workflows\validate-pipelines.yml'
 if ($selfValidation -notmatch [regex]::Escape('pwsh -NoProfile -File tests/test_dokploy_deploy.ps1')) {
   throw 'Pipeline validation must execute the real Dokploy deploy behavior tests'
@@ -324,22 +327,64 @@ $containerReleaseExample = Get-Content -Raw -LiteralPath 'examples\container-rel
 if ($containerReleaseExample -notmatch '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\["main"\]') {
   throw 'The container release example must trigger on pushes to main'
 }
-if ($containerReleaseExample -match '(?ms)^\s+with:\s*$') {
+$containerBuildCallerJob = [regex]::Match($containerReleaseExample, '(?ms)^  build:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
+if ($containerBuildCallerJob -match '(?m)^ {4}with:\s*$') {
   throw 'The container release example must rely on the reusable release defaults and omit inputs'
 }
-$containerReleaseCallerJob = [regex]::Match($containerReleaseExample, '(?ms)^  release:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
-foreach ($requiredCallerPermission in @('contents: read', 'packages: write', 'id-token: write')) {
-  if ($containerReleaseCallerJob -notmatch [regex]::Escape($requiredCallerPermission)) {
-    throw "The production release caller must grant $requiredCallerPermission"
+foreach ($requiredBuildPermission in @('contents: read', 'packages: write')) {
+  if ($containerBuildCallerJob -notmatch [regex]::Escape($requiredBuildPermission)) {
+    throw "The reusable build caller must grant $requiredBuildPermission"
   }
 }
-if ($containerReleaseCallerJob -match '(?m)^ {4}secrets:\s*(inherit\s*$|$)' -or $containerReleaseCallerJob -match '(?m)^ {6}DOKPLOY_API_KEY:\s*') {
-  throw 'The production release caller must not pass Dokploy secrets to the reusable workflow'
+if ($containerBuildCallerJob -match 'id-token:\s*write|environment:\s*production|\$\{\{\s*secrets\.') {
+  throw 'The reusable build caller must not receive production identity or secrets'
+}
+
+$containerDeployCallerJob = [regex]::Match($containerReleaseExample, '(?ms)^  deploy:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
+foreach ($requiredLocalDeployControl in @(
+  'needs: build',
+  'contents: read',
+  'id-token: write',
+  'environment: production',
+  'group: container-release-${{ github.repository }}-${{ vars.DOKPLOY_APPLICATION_ID }}',
+  'cancel-in-progress: false',
+  'tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3',
+  'oauth-client-id: ${{ vars.TS_WIF_CLIENT_ID }}',
+  'audience: ${{ vars.TS_WIF_AUDIENCE }}',
+  'tags: tag:deploy',
+  'DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}',
+  'DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}',
+  'HEALTH_URL: ${{ vars.HEALTH_URL }}',
+  'DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}',
+  'EXPECTED_REVISION: ${{ github.sha }}',
+  'RELEASE_REF: ${{ needs.build.outputs.release-ref }}'
+)) {
+  if ($containerDeployCallerJob -notmatch [regex]::Escape($requiredLocalDeployControl)) {
+    throw "Local production deploy omits required control: $requiredLocalDeployControl"
+  }
+}
+if ($containerDeployCallerJob -match 'packages:\s*write|\$GITHUB_OUTPUT|::set-output') {
+  throw 'The local deploy job must neither publish packages nor emit secret-bearing outputs'
+}
+if ($containerReleaseExample -match '(?m)^\s+secrets:\s*(inherit\s*$|$)') {
+  throw 'The release caller must read the environment secret only in its local production job'
 }
 
 $releaseExamplePin = [regex]::Match($containerReleaseExample, '(?m)^ {4}uses:\s+LouisVannobel/projetV0-pipelines/\.github/workflows/reusable-container-release\.yml@(?<sha>[0-9a-f]{40})\s+#\s+v\d+\.\d+\.\d+\s*$')
 if (-not $releaseExamplePin.Success) { throw 'The container release example must expose its immutable full SHA' }
-$pinnedHelper = ConvertTo-NormalizedLineEndingBytes (Get-GitBlobBytes "$($releaseExamplePin.Groups['sha'].Value):$deployActionScriptPath")
+$pinnedContainerRelease = (& git show "$($releaseExamplePin.Groups['sha'].Value):.github/workflows/reusable-container-release.yml") -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'The container release example must pin a readable reusable workflow revision' }
+foreach ($requiredPinnedOutput in @{
+  'release-ref' = '(?ms)^ {6}release-ref:\s*$.*?^ {8}value:\s*\$\{\{\s*jobs\.release\.outputs\.release-ref\s*\}\}\s*$'
+  'digest' = '(?ms)^ {6}digest:\s*$.*?^ {8}value:\s*\$\{\{\s*jobs\.release\.outputs\.digest\s*\}\}\s*$'
+}.GetEnumerator()) {
+  if ($pinnedContainerRelease -notmatch $requiredPinnedOutput.Value) {
+    throw "The pinned reusable release does not expose caller output: $($requiredPinnedOutput.Key)"
+  }
+}
+$deployActionPin = [regex]::Match($containerDeployCallerJob, '(?m)^\s+uses:\s+LouisVannobel/projetV0-pipelines/\.github/actions/deploy-dokploy@(?<sha>[0-9a-f]{40})\s+#\s+v\d+\.\d+\.\d+\s*$')
+if (-not $deployActionPin.Success) { throw 'The local production deploy must pin the private Dokploy action by full SHA' }
+$pinnedHelper = ConvertTo-NormalizedLineEndingBytes (Get-GitBlobBytes "$($deployActionPin.Groups['sha'].Value):$deployActionScriptPath")
 $currentHelper = ConvertTo-NormalizedLineEndingBytes ([System.IO.File]::ReadAllBytes((Join-Path (Split-Path -Parent $PSScriptRoot) $deployActionScriptPath)))
 if ([Convert]::ToBase64String($pinnedHelper) -ne [Convert]::ToBase64String($currentHelper)) {
   throw 'The container release example must pin the exact behavior-tested Dokploy helper'
