@@ -26,12 +26,8 @@ export function validateSmokeWorkflow(workflow) {
   const upload = evidenceSteps.filter((step) => typeof step?.uses === 'string'
     && step.uses.startsWith('actions/upload-artifact@'));
 
-  fail(errors, sameKeys(triggers, ['workflow_dispatch', 'push'])
-    && sameKeys(triggers.push, ['branches'])
-    && Array.isArray(triggers.push.branches)
-    && triggers.push.branches.length === 1
-    && triggers.push.branches[0] === 'z/voice-cell-oci-release',
-  'trigger: only workflow_dispatch and the exact temporary qualification branch are allowed');
+  fail(errors, sameKeys(triggers, ['workflow_dispatch']),
+    'trigger: only workflow_dispatch is allowed');
   fail(errors, sameKeys(workflow?.permissions, []), 'permissions: workflow root must be empty');
   fail(errors, isObject(workflow?.concurrency)
     && workflow.concurrency.group === 'projetv0-pipelines-oci-smoke'

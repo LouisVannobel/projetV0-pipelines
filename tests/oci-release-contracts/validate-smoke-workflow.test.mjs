@@ -20,10 +20,9 @@ test('the repository smoke caller proves the additive OCI release contract', () 
   assert.deepEqual(validateSmokeWorkflow(loadFixture(smokePath)), []);
 });
 
-test('the qualification smoke caller has only the exact temporary branch push trigger', () => {
+test('the permanent smoke caller can only be started manually', () => {
   const triggers = loadFixture(smokePath).on;
-  assert.deepEqual(Object.keys(triggers), ['workflow_dispatch', 'push']);
-  assert.deepEqual(triggers.push, { branches: ['z/voice-cell-oci-release'] });
+  assert.deepEqual(triggers, { workflow_dispatch: null });
 });
 
 test('the exact scratch smoke fixture ends with a numeric non-root identity', () => {

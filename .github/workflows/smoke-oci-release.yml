@@ -2,9 +2,6 @@ name: Smoke additive OCI release
 
 on:
   workflow_dispatch:
-  # TEMPORARY: remove after the final same-commit OCI qualification succeeds.
-  push:
-    branches: [z/voice-cell-oci-release]
 
 permissions: {}
 
