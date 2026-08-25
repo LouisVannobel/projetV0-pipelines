@@ -4,6 +4,10 @@ on:
   push:
     branches: ["main"]
 
+concurrency:
+  group: container-release-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   build:
     permissions:
@@ -17,9 +21,6 @@ jobs:
       contents: read
       id-token: write
     environment: production
-    concurrency:
-      group: container-release-${{ github.repository }}-${{ vars.DOKPLOY_APPLICATION_ID }}
-      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

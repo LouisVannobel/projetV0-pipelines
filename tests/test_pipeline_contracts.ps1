@@ -327,6 +327,14 @@ $containerReleaseExample = Get-Content -Raw -LiteralPath 'examples\container-rel
 if ($containerReleaseExample -notmatch '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\["main"\]') {
   throw 'The container release example must trigger on pushes to main'
 }
+foreach ($requiredWorkflowConcurrency in @(
+  'group: container-release-${{ github.repository }}',
+  'cancel-in-progress: false'
+)) {
+  if ($containerReleaseExample -notmatch "(?ms)^concurrency:\s*`r?`n.*?$([regex]::Escape($requiredWorkflowConcurrency))") {
+    throw "The complete release workflow must serialize build through deploy: $requiredWorkflowConcurrency"
+  }
+}
 $containerBuildCallerJob = [regex]::Match($containerReleaseExample, '(?ms)^  build:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
 if ($containerBuildCallerJob -match '(?m)^ {4}with:\s*$') {
   throw 'The container release example must rely on the reusable release defaults and omit inputs'
@@ -346,8 +354,6 @@ foreach ($requiredLocalDeployControl in @(
   'contents: read',
   'id-token: write',
   'environment: production',
-  'group: container-release-${{ github.repository }}-${{ vars.DOKPLOY_APPLICATION_ID }}',
-  'cancel-in-progress: false',
   'tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3',
   'oauth-client-id: ${{ vars.TS_WIF_CLIENT_ID }}',
   'audience: ${{ vars.TS_WIF_AUDIENCE }}',
@@ -365,6 +371,9 @@ foreach ($requiredLocalDeployControl in @(
 }
 if ($containerDeployCallerJob -match 'packages:\s*write|\$GITHUB_OUTPUT|::set-output') {
   throw 'The local deploy job must neither publish packages nor emit secret-bearing outputs'
+}
+if ($containerDeployCallerJob -match '(?m)^ {4}concurrency:\s*$') {
+  throw 'Deploy-only concurrency cannot prevent an older build from deploying after a newer revision'
 }
 if ($containerReleaseExample -match '(?m)^\s+secrets:\s*(inherit\s*$|$)') {
   throw 'The release caller must read the environment secret only in its local production job'
