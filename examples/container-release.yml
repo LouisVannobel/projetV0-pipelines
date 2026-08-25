@@ -9,7 +9,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-container-release.yml@5d628d4ebd84088985419f1e3c4bdf7fb72907d4 # v1.3.0
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-container-release.yml@bc5084f80c4aef7a1d1393fc3f5617fc46a6fb6d # v1.3.0
 
   deploy:
     needs: build
@@ -30,7 +30,7 @@ jobs:
           audience: ${{ vars.TS_WIF_AUDIENCE }}
           tags: tag:deploy
       - name: Deploy verified digest through Dokploy
-        uses: LouisVannobel/projetV0-pipelines/.github/actions/deploy-dokploy@5d628d4ebd84088985419f1e3c4bdf7fb72907d4 # v1.3.0
+        uses: LouisVannobel/projetV0-pipelines/.github/actions/deploy-dokploy@bc5084f80c4aef7a1d1393fc3f5617fc46a6fb6d # v1.3.0
         env:
           DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}
           DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}

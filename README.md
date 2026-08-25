@@ -6,7 +6,7 @@ Workflows GitHub Actions réutilisables pour les SaaS du studio.
 
 Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` et `examples/container-release.yml` vers `.github/workflows/release.yml`. Les deux workflows sont épinglés au même commit immuable :
 
-`5d628d4ebd84088985419f1e3c4bdf7fb72907d4` (`v1.3.0`)
+`bc5084f80c4aef7a1d1393fc3f5617fc46a6fb6d` (`v1.3.0`)
 
 Le SaaS fournit `package.json`, `pnpm-lock.yaml`, un Dockerfile multi-stage et les scripts pnpm `lint`, `typecheck`, `test`, `build` et `test:a11y`. Lighthouse reste opt-in. La CI publie le statut requis `CI / gate`.
 
