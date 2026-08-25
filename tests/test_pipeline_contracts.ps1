@@ -40,11 +40,16 @@ function Get-GitBlobBytes {
   return $output.ToArray()
 }
 
+$ociReleaseWorkflow = '.github\workflows\reusable-oci-release.yml'
 $workflows = @(
   '.github\workflows\reusable-saas-ci.yml',
   '.github\workflows\reusable-container-release.yml',
-  '.github\workflows\reusable-repository-ci.yml'
+  '.github\workflows\reusable-repository-ci.yml',
+  $ociReleaseWorkflow
 )
+if ($workflows -notcontains $ociReleaseWorkflow) {
+  throw 'The local actionlint workflow set must include the serialized OCI release workflow'
+}
 
 foreach ($path in $workflows) {
   if (-not (Test-Path -LiteralPath $path)) { throw "Missing reusable workflow: $path" }
