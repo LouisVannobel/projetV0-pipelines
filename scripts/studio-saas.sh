@@ -41,9 +41,15 @@ api_cookie() {
 api_key_status() {
   local method="$1" path="$2" body="$3" output="$4" key="$5"
   local header_file status
-  header_file="$(mktemp)"
-  chmod 0600 "$header_file"
-  printf 'x-api-key: %s\n' "$key" >"$header_file"
+  header_file="$(mktemp)" || die 'cannot create API key header file'
+  chmod 0600 "$header_file" || {
+    rm -f -- "$header_file" || :
+    die 'cannot protect API key header file'
+  }
+  printf 'x-api-key: %s\n' "$key" >"$header_file" || {
+    rm -f -- "$header_file" || :
+    die 'cannot write API key header file'
+  }
   local -a args=(--silent --show-error --connect-timeout 5 --max-time 30 -H "@$header_file" -o "$output" -w '%{http_code}' -X "$method")
   if [[ -n "$body" ]]; then
     args+=(-H 'content-type: application/json' --data-binary @-)
@@ -51,7 +57,7 @@ api_key_status() {
   else
     status="$(curl "${args[@]}" "$API_BASE$path")" || status=000
   fi
-  rm -f -- "$header_file"
+  rm -f -- "$header_file" || die 'cannot remove API key header file'
   printf '%s\n' "$status"
 }
 
@@ -91,11 +97,28 @@ load_state() {
 }
 
 port_taken() {
-  local port="$1"
-  ss -H -ltn | awk '{print $4}' | grep -Eq "(^|:)$port$" && return 0
-  docker service ls --format '{{.Ports}}' 2>/dev/null | grep -Eq "(^|[,*:])$port->" && return 0
-  tailscale serve status --json 2>/dev/null | grep -Eq "[:\"]$port([/\"]|$)" && return 0
-  grep -hE "^(PUBLISHED_PORT|HEALTH_PORT)=$port$" "$STATE_DIR"/*.env 2>/dev/null | grep -q . && return 0
+  local port="$1" observed status
+  local -a state_files=() service_ids=()
+  observed="$(ss -H -ltn | awk '{print $4}')" || die 'cannot inspect listening TCP ports'
+  if grep -Eq "(^|:)$port$" <<<"$observed"; then return 0; else status=$?; [[ "$status" == 1 ]] || die 'cannot match listening TCP ports'; fi
+
+  observed="$(docker service ls -q)" || die 'cannot list Docker services'
+  if [[ -n "$observed" ]]; then
+    mapfile -t service_ids <<<"$observed" || die 'cannot decode Docker service inventory'
+    observed="$(docker service inspect --format '{{range .Endpoint.Spec.Ports}}{{println .PublishedPort}}{{end}}' "${service_ids[@]}")" ||
+      die 'cannot inspect Docker service ports'
+    if grep -qx "$port" <<<"$observed"; then return 0; else status=$?; [[ "$status" == 1 ]] || die 'cannot match Docker service ports'; fi
+  fi
+
+  observed="$(tailscale serve status --json)" || die 'cannot inspect Tailscale Serve ports'
+  if grep -Eq "[:\"]$port([/\"]|$)" <<<"$observed"; then return 0; else status=$?; [[ "$status" == 1 ]] || die 'cannot match Tailscale Serve ports'; fi
+
+  shopt -s nullglob
+  state_files=("$STATE_DIR"/*.env)
+  shopt -u nullglob
+  if ((${#state_files[@]})); then
+    if grep -hEq "^(PUBLISHED_PORT|HEALTH_PORT)=$port$" "${state_files[@]}"; then return 0; else status=$?; [[ "$status" == 1 ]] || die 'cannot inspect stored SaaS ports'; fi
+  fi
   return 1
 }
 
@@ -121,16 +144,73 @@ allocate_ports() {
 
 login() {
   local email="$1" password="$2" cookie="$3" output="$4" body status
-  body="$(jq -cn --arg email "$email" --arg password "$password" '{email:$email,password:$password}')"
+  body="$(printf '%s' "$password" | jq -Rsc --arg email "$email" '{email:$email,password:.}')" ||
+    die 'cannot encode Dokploy login request'
   status="$(curl --silent --show-error --connect-timeout 5 --max-time 30 -c "$cookie" -o "$output" -w '%{http_code}' -H 'content-type: application/json' -X POST --data-binary @- "$API_BASE/auth/sign-in/email" <<<"$body")" ||
     die 'Dokploy login request failed'
   [[ "$status" == 200 ]] || die "Dokploy login rejected status=$status"
   awk '(!/^#/ || /^#HttpOnly_/) && NF >= 7 {found=1} END {exit !found}' "$cookie" || die 'Dokploy login returned no session cookie'
 }
 
+read_matching_key_ids() {
+  local response="$1" key_name="$2"
+  jq -e '
+    (.user.apiKeys | type) == "array" and
+    all(.user.apiKeys[];
+      (.name | type) == "string" and
+      (.id | type) == "string" and
+      (.id | test("^[A-Za-z0-9_-]+$")))
+  ' "$response" >/dev/null || die 'Dokploy returned an invalid API key inventory'
+  jq -r --arg name "$key_name" '.user.apiKeys[] | select(.name==$name) | .id' "$response"
+}
+
+reconcile_deployment_key() {
+  local member_cookie="$1" response="$2" organization_id="$3"
+  local key_name key_probe_status key_valid key_body key_id matching_key_output
+  local -a matching_key_ids=()
+  key_name="ci-${SLUG:0:20}"
+  key_valid=false
+  if [[ -n "$API_KEY" ]]; then
+    key_probe_status="$(api_key_status GET "/application.one?applicationId=$APPLICATION_ID" '' "$response" "$API_KEY")"
+    case "$key_probe_status" in
+      200) key_valid=true ;;
+      401) key_valid=false ;;
+      *) die "cannot determine deployment key validity status=$key_probe_status" ;;
+    esac
+  fi
+
+  api_cookie GET /user.get '' "$response" "$member_cookie"
+  matching_key_output="$(read_matching_key_ids "$response" "$key_name")" || die 'cannot read Dokploy API key inventory'
+  if [[ -n "$matching_key_output" ]]; then mapfile -t matching_key_ids <<<"$matching_key_output"; fi
+  if [[ ${#matching_key_ids[@]} -ne 1 || "$key_valid" != true ]]; then
+    for key_id in "${matching_key_ids[@]}"; do
+      api_cookie POST /user.deleteApiKey "$(jq -cn --arg id "$key_id" '{apiKeyId:$id}')" "$response" "$member_cookie"
+    done
+    API_KEY=''
+    save_state
+    key_body="$(jq -cn --arg name "$key_name" --arg organization "$organization_id" '{name:$name,prefix:"pv0",expiresIn:31536000,metadata:{organizationId:$organization},rateLimitEnabled:false}')"
+    api_cookie POST /user.createApiKey "$key_body" "$response" "$member_cookie"
+    API_KEY="$(jq -r '.key // empty' "$response")"
+    [[ ${#API_KEY} -ge 20 ]] || die 'Dokploy returned an invalid API key'
+    api_cookie GET /user.get '' "$response" "$member_cookie"
+    matching_key_output="$(read_matching_key_ids "$response" "$key_name")" || die 'cannot read reconciled Dokploy API key inventory'
+    matching_key_ids=()
+    if [[ -n "$matching_key_output" ]]; then mapfile -t matching_key_ids <<<"$matching_key_output"; fi
+    [[ ${#matching_key_ids[@]} -eq 1 ]] || die 'Dokploy API key reconciliation did not converge'
+    save_state
+  fi
+}
+
+verify_peer_application_isolation() {
+  local other_application="$1" response="$2" key="$3"
+  [[ -z "$other_application" ]] ||
+    api_key_status GET "/application.one?applicationId=$other_application" '' "$response" "$key" | grep -qx 401 ||
+    die 'deployment key can access another application'
+}
+
 provision() {
   local admin_cookie member_cookie response project_id environment_id project_count environment_count current_image application_count matched_environment
-  local member_count member_body permission_body key_body organization_id key_status other_application negative_body
+  local member_count member_body permission_body organization_id key_status other_application negative_body
   require_root
   for command_name in curl jq openssl flock docker tailscale ss; do command -v "$command_name" >/dev/null || die "$command_name is unavailable"; done
   [[ -f "$ADMIN_ENV" ]] || die 'Dokploy admin recovery file is absent'
@@ -217,7 +297,8 @@ provision() {
   [[ "$member_count" -le 1 ]] || die 'duplicate Dokploy deployment members found'
   if [[ "$member_count" == 0 ]]; then
     if [[ -z "$MEMBER_PASSWORD" ]]; then MEMBER_PASSWORD="$(openssl rand -base64 36 | tr -d '\r\n')"; save_state; fi
-    member_body="$(jq -cn --arg email "$MEMBER_EMAIL" --arg password "$MEMBER_PASSWORD" '{email:$email,password:$password,role:"member"}')"
+    member_body="$(printf '%s' "$MEMBER_PASSWORD" | jq -Rsc --arg email "$MEMBER_EMAIL" '{email:$email,password:.,role:"member"}')" ||
+      die 'cannot encode deployment member request'
     api_cookie POST /user.createUserWithCredentials "$member_body" "$response" "$admin_cookie"
     MEMBER_USER_ID="$(jq -r '.userId // empty' "$response")"
   else
@@ -230,28 +311,18 @@ provision() {
   permission_body="$(jq -cn --arg id "$MEMBER_USER_ID" --arg environment "$environment_id" --arg application "$APPLICATION_ID" '{id:$id,accessedProjects:[],accessedEnvironments:[$environment],accessedServices:[$application],accessedGitProviders:[],accessedServers:[],canCreateProjects:false,canCreateServices:true,canDeleteProjects:false,canDeleteServices:false,canAccessToDocker:false,canAccessToTraefikFiles:false,canAccessToAPI:false,canAccessToSSHKeys:false,canAccessToGitProviders:false,canDeleteEnvironments:false,canCreateEnvironments:false}')"
   api_cookie POST /user.assignPermissions "$permission_body" "$response" "$admin_cookie"
 
-  if [[ -z "$API_KEY" ]] || [[ "$(api_key_status GET "/application.one?applicationId=$APPLICATION_ID" '' "$response" "$API_KEY")" != 200 ]]; then
-    login "$MEMBER_EMAIL" "$MEMBER_PASSWORD" "$member_cookie" "$response"
-    api_cookie GET /user.session '' "$response" "$member_cookie"
-    organization_id="$(jq -r '.session.activeOrganizationId // empty' "$response")"
-    [[ "$organization_id" =~ ^[A-Za-z0-9_-]+$ ]] || die 'Dokploy session returned an invalid organization ID'
-    key_body="$(jq -cn --arg name "ci-${SLUG:0:20}" --arg organization "$organization_id" '{name:$name,prefix:"pv0",expiresIn:31536000,metadata:{organizationId:$organization},rateLimitEnabled:false}')"
-    api_cookie POST /user.createApiKey "$key_body" "$response" "$member_cookie"
-    API_KEY="$(jq -r '.key // empty' "$response")"
-    [[ ${#API_KEY} -ge 20 ]] || die 'Dokploy returned an invalid API key'
-    save_state
-  fi
+  login "$MEMBER_EMAIL" "$MEMBER_PASSWORD" "$member_cookie" "$response"
+  api_cookie GET /user.session '' "$response" "$member_cookie"
+  organization_id="$(jq -r '.session.activeOrganizationId // empty' "$response")"
+  [[ "$organization_id" =~ ^[A-Za-z0-9_-]+$ ]] || die 'Dokploy session returned an invalid organization ID'
+  reconcile_deployment_key "$member_cookie" "$response" "$organization_id"
 
   api_cookie GET "/project.one?projectId=$project_id" '' "$response" "$admin_cookie"
   other_application="$(jq -r --arg environment "$environment_id" --arg own "$APPLICATION_ID" '[.environments[] | select(.environmentId==$environment) | .applications[]? | select(.applicationId!=$own)] | if length>0 then .[0].applicationId else empty end' "$response")"
-  [[ -n "$other_application" ]] || die 'no second real application exists for the isolation test'
   key_status="$(api_key_status GET "/application.one?applicationId=$APPLICATION_ID" '' "$response" "$API_KEY")"
   [[ "$key_status" == 200 ]] || die 'deployment key cannot read its application'
   api_key_status POST /application.update "$(jq -cn --arg application "$APPLICATION_ID" --arg image "$current_image" '{applicationId:$application,dockerImage:$image}')" "$response" "$API_KEY" | grep -qx 200 || die 'deployment key cannot update its application'
-  api_key_status GET "/application.one?applicationId=$other_application" '' "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can access another application'
-  api_key_status POST /application.update "$(jq -cn --arg application "$other_application" '{applicationId:$application,dockerImage:"ghcr.io/louisvannobel/forbidden@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}')" "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can update another application'
-  api_key_status POST /application.deploy "$(jq -cn --arg application "$other_application" '{applicationId:$application,title:"forbidden"}')" "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can deploy another application'
-  api_key_status POST /application.delete "$(jq -cn --arg application "$other_application" '{applicationId:$application}')" "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can delete another application'
+  verify_peer_application_isolation "$other_application" "$response" "$API_KEY"
   negative_body="$(jq -cn --arg environment "$environment_id" '{name:"forbidden",appName:"forbidden",environmentId:$environment,sourceType:"docker"}')"
   api_key_status POST /application.create "$negative_body" "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can create applications'
   api_key_status POST /environment.create "$(jq -cn --arg project "$project_id" '{name:"forbidden",projectId:$project}')" "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can create environments'
@@ -266,15 +337,16 @@ provision() {
 }
 
 inspect_runtime() {
-  local spec image memory cpu managed replicas failure order parallelism update_delay update_monitor max_failure_ratio containers container health health_body revision labels endpoint_ports serve_status serve_key expected_proxy
+  local spec image memory cpu managed replicas failure order parallelism update_delay update_monitor max_failure_ratio rollback_failure rollback_order rollback_parallelism rollback_delay rollback_monitor rollback_failure_ratio containers container health health_body revision labels endpoint_ports serve_status serve_key expected_proxy
   require_root
   load_state
   [[ -n "$APPLICATION_ID" && -n "$PUBLISHED_PORT" && -n "$HEALTH_PORT" ]] || die 'SaaS state is incomplete'
   [[ "$APP_NAME" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || die 'stored Dokploy application service name is invalid'
-  spec="$(docker service inspect "$APP_NAME" --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}|{{.Spec.TaskTemplate.Resources.Limits.MemoryBytes}}|{{.Spec.TaskTemplate.Resources.Limits.NanoCPUs}}|{{index .Spec.TaskTemplate.ContainerSpec.Labels "studio.projetv0.managed"}}|{{.Spec.Mode.Replicated.Replicas}}|{{.Spec.UpdateConfig.FailureAction}}|{{.Spec.UpdateConfig.Order}}|{{.Spec.UpdateConfig.Parallelism}}|{{.Spec.UpdateConfig.Delay}}|{{.Spec.UpdateConfig.Monitor}}|{{.Spec.UpdateConfig.MaxFailureRatio}}')" || die 'SaaS service is absent'
-  IFS='|' read -r image memory cpu managed replicas failure order parallelism update_delay update_monitor max_failure_ratio <<<"$spec"
+  spec="$(docker service inspect "$APP_NAME" --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}|{{.Spec.TaskTemplate.Resources.Limits.MemoryBytes}}|{{.Spec.TaskTemplate.Resources.Limits.NanoCPUs}}|{{index .Spec.TaskTemplate.ContainerSpec.Labels "studio.projetv0.managed"}}|{{.Spec.Mode.Replicated.Replicas}}|{{.Spec.UpdateConfig.FailureAction}}|{{.Spec.UpdateConfig.Order}}|{{.Spec.UpdateConfig.Parallelism}}|{{.Spec.UpdateConfig.Delay}}|{{.Spec.UpdateConfig.Monitor}}|{{.Spec.UpdateConfig.MaxFailureRatio}}|{{.Spec.RollbackConfig.FailureAction}}|{{.Spec.RollbackConfig.Order}}|{{.Spec.RollbackConfig.Parallelism}}|{{.Spec.RollbackConfig.Delay}}|{{.Spec.RollbackConfig.Monitor}}|{{.Spec.RollbackConfig.MaxFailureRatio}}')" || die 'SaaS service is absent'
+  IFS='|' read -r image memory cpu managed replicas failure order parallelism update_delay update_monitor max_failure_ratio rollback_failure rollback_order rollback_parallelism rollback_delay rollback_monitor rollback_failure_ratio <<<"$spec"
   [[ "$image" =~ ^ghcr\.io/louisvannobel/$SLUG@sha256:[0-9a-f]{64}$ ]] || die 'SaaS service image is not the expected immutable digest'
   [[ "$memory|$cpu|$managed|$replicas|$failure|$order|$parallelism|$update_delay|$update_monitor|$max_failure_ratio" == '536870912|1000000000|true|1|rollback|start-first|1|5s|30s|0' ]] || die 'SaaS service policy drifted'
+  [[ "$rollback_failure|$rollback_order|$rollback_parallelism|$rollback_delay|$rollback_monitor|$rollback_failure_ratio" == 'pause|stop-first|1|5s|30s|0' ]] || die 'SaaS rollback policy drifted'
   endpoint_ports="$(docker service inspect "$APP_NAME" --format '{{json .Endpoint.Spec.Ports}}')"
   jq -e --argjson published "$PUBLISHED_PORT" 'length==1 and .[0].Protocol=="tcp" and .[0].TargetPort==3000 and .[0].PublishedPort==$published and .[0].PublishMode=="ingress"' <<<"$endpoint_ports" >/dev/null || die 'SaaS published port policy drifted'
   mapfile -t containers < <(docker ps --filter "label=com.docker.swarm.service.name=$APP_NAME" --filter status=running --format '{{.ID}}')

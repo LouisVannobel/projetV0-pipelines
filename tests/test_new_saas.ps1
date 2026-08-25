@@ -48,6 +48,9 @@ if ($localSource -notmatch '(?s)StandardOutput[.]BaseStream[.]CopyTo\(.*Standard
 foreach ($required in @('template_repository.full_name', '$templateRevision', '9df204d23475ca7a00922307e7df825531211db2', 'STUDIO_SAAS_VERSION', 'sshProcess.ExitCode', 'ghProcess.ExitCode', 'gh run rerun $run.databaseId --repo $repo --failed')) {
   if (-not $localSource.Contains($required)) { throw "new-saas omits required collision/transport guard: $required" }
 }
+if (-not $localSource.Contains("`$templateRevision = '321f007caadca4b604e7c365d201d6dd8219dd7a'")) {
+  throw 'new-saas must pin the reviewed template commit'
+}
 if ($localSource.Contains('$installCommand') -or $localSource -match 'install .*studio-saas') {
   throw 'The normal SaaS path must not install or update a root helper'
 }
@@ -82,6 +85,7 @@ foreach ($required in @(
     'start-first',
     'rollback',
     '.Spec.UpdateConfig.Monitor',
+    '.Spec.RollbackConfig.Monitor',
     'Handlers["/"].Proxy',
     'tailscale serve --bg',
     '/environment.create',
@@ -93,12 +97,17 @@ foreach ($required in @(
 if (-not $remoteSource.Contains('printf ''%s'' "$API_KEY"')) {
   throw 'studio-saas secret command must emit only the stored API key'
 }
-foreach ($required in @('APP_NAME=', 'STUDIO_SAAS_VERSION', 'trap ''rm -f -- "$admin_cookie" "$member_cookie" "$response"'' EXIT', 'ambiguous Dokploy application matches', 'no second real application')) {
+foreach ($required in @('APP_NAME=', 'STUDIO_SAAS_VERSION', 'trap ''rm -f -- "$admin_cookie" "$member_cookie" "$response"'' EXIT', 'ambiguous Dokploy application matches', '/user.deleteApiKey', 'matching_key_ids', 'verify_peer_application_isolation')) {
   if (-not $remoteSource.Contains($required)) { throw "studio-saas omits required state/cleanup/isolation guard: $required" }
 }
 if ($remoteSource.Contains('not-an-application')) { throw 'Isolation tests must never use a fabricated application ID' }
 if ($remoteSource.Contains('--data "$body"') -or $remoteSource.Contains('-H "x-api-key: $key"')) {
   throw 'Dokploy passwords, request bodies, and API keys must not appear in curl argv'
+}
+foreach ($forbiddenPasswordArgument in @('--arg password "$password"', '--arg password "$MEMBER_PASSWORD"')) {
+  if ($remoteSource.Contains($forbiddenPasswordArgument)) {
+    throw 'Dokploy passwords must not appear in external process arguments'
+  }
 }
 if ($remoteSource -match 'printf.*(MEMBER_PASSWORD|API_KEY).*application=') {
   throw 'studio-saas provision output must stay non-secret'
@@ -115,5 +124,7 @@ $expectedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $remoteScript).Hash
 if ($LASTEXITCODE -ne 0 -or $versionOutput -cne "STUDIO_SAAS_VERSION sha256=$expectedHash") {
   throw "studio-saas version must identify the exact helper bytes: $versionOutput"
 }
+& bash 'tests/test_studio_saas_reconciliation.sh'
+if ($LASTEXITCODE -ne 0) { throw 'studio-saas reconciliation behavior failed' }
 
 Write-Output 'NEW_SAAS_TESTS_OK'
