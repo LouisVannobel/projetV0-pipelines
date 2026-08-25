@@ -8,6 +8,9 @@ $installerScript = Join-Path $root 'scripts\install-studio-saas.ps1'
 if (-not (Test-Path -LiteralPath $localScript)) { throw 'Missing scripts/new-saas.ps1' }
 if (-not (Test-Path -LiteralPath $remoteScript)) { throw 'Missing scripts/studio-saas.sh' }
 if (-not (Test-Path -LiteralPath $installerScript)) { throw 'Missing scripts/install-studio-saas.ps1' }
+$reviewedHelperHash = 'd55edde4cf838dc38cb92b86e88a65d38c07ee409cca071ac877874ebded7543'
+$actualHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $remoteScript).Hash.ToLowerInvariant()
+if ($actualHelperHash -cne $reviewedHelperHash) { throw "Repository studio-saas.sh is not the reviewed artifact: $actualHelperHash" }
 
 $invalidOutput = @(& pwsh -NoProfile -File $localScript 'Bad Name' -DryRun 2>&1)
 if ($LASTEXITCODE -eq 0 -or ($invalidOutput -join "`n") -notmatch 'lowercase slug') {
@@ -55,9 +58,47 @@ if ($localSource.Contains('$installCommand') -or $localSource -match 'install .*
   throw 'The normal SaaS path must not install or update a root helper'
 }
 $installerSource = Get-Content -Raw -LiteralPath $installerScript
-foreach ($required in @('/etc/sudoers.d/studio-saas', 'visudo -cf', '^(validate-slug|provision|inspect|secret) [a-z0-9][a-z0-9-]*$')) {
+$installerTestRoot = Join-Path ([IO.Path]::GetTempPath()) "studio-saas-installer-$([guid]::NewGuid().ToString('N'))"
+$fakeBin = Join-Path $installerTestRoot 'bin'
+$bashMarker = Join-Path $installerTestRoot 'bash-ran'
+$scpMarker = Join-Path $installerTestRoot 'scp-ran'
+$sshMarker = Join-Path $installerTestRoot 'ssh-ran'
+try {
+  New-Item -ItemType Directory -Path $fakeBin | Out-Null
+  Copy-Item -LiteralPath $installerScript -Destination (Join-Path $installerTestRoot 'install-studio-saas.ps1')
+  Copy-Item -LiteralPath $remoteScript -Destination (Join-Path $installerTestRoot 'studio-saas.sh')
+  Add-Content -LiteralPath (Join-Path $installerTestRoot 'studio-saas.sh') -Value '# unreviewed drift'
+  Set-Content -LiteralPath (Join-Path $fakeBin 'bash.cmd') -Value "@echo off`r`ntype nul > `"$bashMarker`"`r`nexit /b 0"
+  Set-Content -LiteralPath (Join-Path $fakeBin 'scp.cmd') -Value "@echo off`r`ntype nul > `"$scpMarker`"`r`nexit /b 0"
+  Set-Content -LiteralPath (Join-Path $fakeBin 'ssh.cmd') -Value "@echo off`r`ntype nul > `"$sshMarker`"`r`nexit /b 1"
+  $previousPath = $env:PATH
+  $env:PATH = "$fakeBin;$previousPath"
+  $driftOutput = @(& pwsh -NoProfile -File (Join-Path $installerTestRoot 'install-studio-saas.ps1') 2>&1)
+  $driftStatus = $LASTEXITCODE
+  $prematureCommands = @($bashMarker, $scpMarker, $sshMarker) | Where-Object { Test-Path -LiteralPath $_ }
+  if ($driftStatus -eq 0 -or $prematureCommands.Count -ne 0) {
+    throw "Installer must reject unreviewed helper bytes before any command: $($driftOutput -join "`n")"
+  }
+} finally {
+  if ($null -ne $previousPath) { $env:PATH = $previousPath }
+  Remove-Item -LiteralPath $installerTestRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+foreach ($required in @(
+    '/etc/sudoers.d/studio-saas',
+    'visudo -cf',
+    '^(validate-slug|provision|inspect|secret) [a-z0-9][a-z0-9-]*$',
+    "`$expectedHash = 'd55edde4cf838dc38cb92b86e88a65d38c07ee409cca071ac877874ebded7543'",
+    'mktemp -d /tmp/studio-saas.',
+    'mktemp /usr/local/sbin/.studio-saas.',
+    'mktemp /etc/sudoers.d/.studio-saas.',
+    'sha256sum -c -',
+    'test -s',
+    'cmp -s',
+    'mv -fT --'
+  )) {
   if (-not $installerSource.Contains($required)) { throw "One-time studio-saas installer omits: $required" }
 }
+if ($installerSource.Contains('sudo -n tee')) { throw 'Sudoers staging must not pipe into root tee' }
 if ($localSource -match '(?i)Get-Clipboard|Set-Clipboard|Write-(Output|Host).*API_KEY|DOKPLOY_API_KEY\s*=') {
   throw 'new-saas must never materialize or print the Dokploy API key'
 }
