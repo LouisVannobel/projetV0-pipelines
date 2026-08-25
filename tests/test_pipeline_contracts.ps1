@@ -346,6 +346,10 @@ if ([Convert]::ToBase64String($pinnedHelper) -ne [Convert]::ToBase64String($curr
 }
 
 $readme = Get-Content -Raw -LiteralPath 'README.md'
+$immutablePublishedTagPolicy = 'Tous les tags publiés sont immuables et ne doivent jamais être déplacés, notamment les tags actuels `v1.1.0`, `v1.1.1` et `v1.1.2`.'
+if (-not $readme.Contains($immutablePublishedTagPolicy)) {
+  throw 'README must make every published tag immutable and cover v1.1.0, v1.1.1 and v1.1.2'
+}
 foreach ($requiredDeploymentPrerequisite in @(
   'sourceType: docker',
   'identifiants de pull',
