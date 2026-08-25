@@ -88,7 +88,7 @@ jobs:
           printf 'RELEASE_REF=%s\n' "$RELEASE_REF" >> "$GITHUB_ENV"
           printf 'digest=%s\n' "$RELEASE_DIGEST" >> "$GITHUB_OUTPUT"
           printf 'release-ref=%s\n' "$RELEASE_REF" >> "$GITHUB_OUTPUT"
-      - name: Block high and critical image vulnerabilities
+      - name: Block fixable high and critical image vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: 'v0.74.0'

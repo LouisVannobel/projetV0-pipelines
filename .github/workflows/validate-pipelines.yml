@@ -27,6 +27,9 @@ jobs:
       - name: Test private Dokploy deploy boundary
         shell: pwsh
         run: pwsh -NoProfile -File tests/test_dokploy_deploy.ps1
+      - name: Test zero-choice SaaS bootstrap
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/test_new_saas.ps1
       - name: Validate GitHub Actions syntax
         shell: bash
         run: |
