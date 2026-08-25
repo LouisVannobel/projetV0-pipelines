@@ -1,0 +1,247 @@
+name: Smoke additive OCI release
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: projetv0-pipelines-oci-smoke
+  cancel-in-progress: false
+
+jobs:
+  release:
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/reusable-oci-release.yml
+    with:
+      registry-username: ${{ github.actor }}
+      image: ghcr.io/louisvannobel/projetv0-pipelines-smoke
+      version: smoke-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      docker-context: tests/fixtures/oci-release
+      dockerfile: tests/fixtures/oci-release/Dockerfile
+      platforms: linux/amd64
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+      registry-read-password: ${{ secrets.GITHUB_TOKEN }}
+
+  evidence:
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: read
+    env:
+      IMAGE_DIGEST: ${{ needs.release.outputs.image-digest }}
+      IMAGE_REFERENCE: ${{ needs.release.outputs.image-reference }}
+      SBOM_ARTIFACT: ${{ needs.release.outputs.sbom-artifact }}
+      VERSION: smoke-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Authenticate afresh for read-only evidence
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prove raw OCI subjects and promoted tag identity
+        id: inspect-raw-oci
+        shell: bash
+        env:
+          IMAGE: ghcr.io/louisvannobel/projetv0-pipelines-smoke
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          CRANE_VERSION=0.21.9
+          CRANE_CHECKSUM=5c16d8ddb971cb1d5e6ed8b1e743da8224414eeba2c2762d8f1a61b2f095699e
+          archive="go-containerregistry_Linux_x86_64.tar.gz"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$IMAGE_REFERENCE" == "$IMAGE@$IMAGE_DIGEST" ]]
+          [[ "$SBOM_ARTIFACT" == "sbom-$GITHUB_SHA" ]]
+          [[ "$VERSION" == "smoke-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]]
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/${archive}"
+          printf '%s  %s\n' "$CRANE_CHECKSUM" "$RUNNER_TEMP/$archive" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" crane
+          crane="$RUNNER_TEMP/crane"
+          [[ "$($crane digest "$IMAGE_REFERENCE")" == "$IMAGE_DIGEST" ]]
+          version_digest="$($crane digest "$IMAGE:$VERSION")"
+          revision_digest="$($crane digest "$IMAGE:sha-$GITHUB_SHA")"
+          [[ "$version_digest" == "$IMAGE_DIGEST" ]]
+          [[ "$revision_digest" == "$IMAGE_DIGEST" ]]
+          $crane manifest "$IMAGE_REFERENCE" > root-index.json
+          mapfile -t descriptors < <(python3 - <<'PY'
+          import json
+          import re
+
+          digest = re.compile(r"sha256:[0-9a-f]{64}")
+          with open("root-index.json", encoding="utf-8") as handle:
+              root = json.load(handle)
+          if root.get("schemaVersion") != 2 or root.get("mediaType") != "application/vnd.oci.image.index.v1+json":
+              raise SystemExit("invalid OCI root index")
+          manifests = root.get("manifests")
+          if not isinstance(manifests, list) or len(manifests) != 2:
+              raise SystemExit("expected exactly one runnable and one attestation descriptor")
+          runnable = [item for item in manifests if item.get("annotations", {}).get("vnd.docker.reference.type") != "attestation-manifest"]
+          if len(runnable) != 1:
+              raise SystemExit("expected exactly one runnable descriptor")
+          platform = runnable[0]
+          platform_digest = platform.get("digest", "")
+          if (platform.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"
+                  or platform.get("platform") != {"architecture": "amd64", "os": "linux"}
+                  or not digest.fullmatch(platform_digest)):
+              raise SystemExit("invalid linux/amd64 runnable descriptor")
+          attestations = [item for item in manifests if item.get("annotations", {}).get("vnd.docker.reference.type") == "attestation-manifest"]
+          if len(attestations) != 1:
+              raise SystemExit("expected exactly one attestation descriptor")
+          attestation = attestations[0]
+          if (attestation.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"
+                  or attestation.get("annotations", {}).get("vnd.docker.reference.digest") != platform_digest
+                  or attestation.get("platform") != {"architecture": "unknown", "os": "unknown"}
+                  or not digest.fullmatch(attestation.get("digest", ""))):
+              raise SystemExit("invalid linked attestation descriptor")
+          print(platform_digest)
+          print(attestation["digest"])
+          PY
+          )
+          [[ "${#descriptors[@]}" -eq 2 ]]
+          platform_digest="${descriptors[0]}"
+          attestation_digest="${descriptors[1]}"
+          $crane manifest "$IMAGE@$platform_digest" > platform-manifest.json
+          printf '%s  %s\n' "${platform_digest#sha256:}" platform-manifest.json | sha256sum --check
+          python3 - <<'PY'
+          import json
+          import re
+
+          digest = re.compile(r"sha256:[0-9a-f]{64}")
+          with open("platform-manifest.json", encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          if (manifest.get("schemaVersion") != 2
+                  or manifest.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"):
+              raise SystemExit("invalid runnable OCI manifest")
+          config = manifest.get("config")
+          if (not isinstance(config, dict)
+                  or config.get("mediaType") != "application/vnd.oci.image.config.v1+json"
+                  or not digest.fullmatch(config.get("digest", ""))
+                  or isinstance(config.get("size"), bool)
+                  or not isinstance(config.get("size"), int)
+                  or config["size"] <= 0):
+              raise SystemExit("invalid runnable OCI config descriptor")
+          layers = manifest.get("layers")
+          supported_layer_types = {
+              "application/vnd.oci.image.layer.v1.tar",
+              "application/vnd.oci.image.layer.v1.tar+gzip",
+              "application/vnd.oci.image.layer.v1.tar+zstd",
+          }
+          if not isinstance(layers, list) or not layers:
+              raise SystemExit("runnable OCI manifest must contain layers")
+          for layer in layers:
+              if (not isinstance(layer, dict)
+                      or layer.get("mediaType") not in supported_layer_types
+                      or not digest.fullmatch(layer.get("digest", ""))
+                      or isinstance(layer.get("size"), bool)
+                      or not isinstance(layer.get("size"), int)
+                      or layer["size"] <= 0):
+                  raise SystemExit("invalid runnable OCI layer descriptor")
+          PY
+          $crane manifest "$IMAGE@$attestation_digest" > attestation-manifest.json
+          printf '%s  %s\n' "${attestation_digest#sha256:}" attestation-manifest.json | sha256sum --check
+          mapfile -t statement_digests < <(python3 - "$platform_digest" <<'PY'
+          import json
+          import re
+          import sys
+
+          expected = sys.argv[1]
+          digest = re.compile(r"sha256:[0-9a-f]{64}")
+          with open("attestation-manifest.json", encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          if (manifest.get("schemaVersion") != 2
+                  or manifest.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"
+                  or manifest.get("artifactType") != "application/vnd.docker.attestation.manifest.v1+json"):
+              raise SystemExit("invalid attestation manifest")
+          manifest_subject = manifest.get("subject")
+          if (not isinstance(manifest_subject, dict)
+                  or manifest_subject.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"
+                  or manifest_subject.get("digest") != expected):
+              raise SystemExit("attestation manifest subject does not match runnable child")
+          layers = manifest.get("layers")
+          if not isinstance(layers, list) or len(layers) != 2:
+              raise SystemExit("expected exactly two attestation statement layers")
+          expected_predicates = {"https://spdx.dev/Document", "https://slsa.dev/provenance/v1"}
+          actual_predicates = set()
+          for layer in layers:
+              predicate = layer.get("annotations", {}).get("in-toto.io/predicate-type")
+              layer_digest = layer.get("digest", "")
+              if (layer.get("mediaType") != "application/vnd.in-toto+json"
+                      or predicate not in expected_predicates
+                      or predicate in actual_predicates
+                      or not digest.fullmatch(layer_digest)):
+                  raise SystemExit("malformed or ambiguous in-toto layer")
+              actual_predicates.add(predicate)
+              print(f"{predicate}\t{layer_digest}")
+          if actual_predicates != expected_predicates:
+              raise SystemExit("missing required attestation predicate")
+          PY
+          )
+          [[ "${#statement_digests[@]}" -eq 2 ]]
+          for entry in "${statement_digests[@]}"; do
+            predicate="${entry%%$'\t'*}"
+            statement_digest="${entry#*$'\t'}"
+            [[ "$statement_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            case "$predicate" in
+              https://spdx.dev/Document) output=sbom-statement.json ;;
+              https://slsa.dev/provenance/v1) output=provenance-statement.json ;;
+              *) exit 1 ;;
+            esac
+            $crane blob "$IMAGE@$statement_digest" > "$output"
+          done
+          python3 - "${platform_digest#sha256:}" <<'PY'
+          import json
+          import sys
+
+          subject_digest = sys.argv[1]
+          statements = [
+              ("sbom-statement.json", "https://spdx.dev/Document"),
+              ("provenance-statement.json", "https://slsa.dev/provenance/v1"),
+          ]
+          for filename, predicate_type in statements:
+              with open(filename, encoding="utf-8") as handle:
+                  statement = json.load(handle)
+              if statement.get("_type") != "https://in-toto.io/Statement/v1":
+                  raise SystemExit(f"invalid in-toto statement type: {filename}")
+              if statement.get("predicateType") != predicate_type or not isinstance(statement.get("predicate"), dict):
+                  raise SystemExit(f"invalid predicate: {filename}")
+              subjects = statement.get("subject")
+              if (not isinstance(subjects, list) or len(subjects) != 1
+                      or subjects[0].get("digest") != {"sha256": subject_digest}):
+                  raise SystemExit(f"statement subject does not exactly match runnable child: {filename}")
+          with open("sbom-statement.json", encoding="utf-8") as handle:
+              sbom = json.load(handle)["predicate"]
+          if sbom.get("SPDXID") != "SPDXRef-DOCUMENT" or not str(sbom.get("spdxVersion", "")).startswith("SPDX-"):
+              raise SystemExit("invalid SPDX predicate")
+          with open("provenance-statement.json", encoding="utf-8") as handle:
+              provenance = json.load(handle)["predicate"]
+          builder_id = provenance.get("runDetails", {}).get("builder", {}).get("id")
+          if (provenance.get("buildDefinition", {}).get("buildType") != "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md"
+                  or not isinstance(builder_id, str) or not builder_id.strip()):
+              raise SystemExit("invalid SLSA v1 predicate")
+          PY
+          python3 - "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$IMAGE_REFERENCE" "$IMAGE_DIGEST" "$platform_digest" "$attestation_digest" "$version_digest" "$revision_digest" <<'PY'
+          import json
+          import sys
+
+          keys = ["commit", "run_id", "run_attempt", "image_reference", "root_digest", "platform_digest", "attestation_digest", "version_tag_digest", "revision_tag_digest"]
+          evidence = dict(zip(keys, sys.argv[1:], strict=True))
+          with open("oci-evidence.json", "w", encoding="utf-8") as handle:
+              json.dump(evidence, handle, indent=2, sort_keys=True)
+              handle.write("\n")
+          PY
+      - name: Upload sanitized OCI evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oci-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: oci-evidence.json
+          if-no-files-found: error
+          retention-days: 14

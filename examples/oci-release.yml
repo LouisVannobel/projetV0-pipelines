@@ -1,0 +1,44 @@
+name: Publish immutable OCI image
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  release:
+    permissions:
+      contents: read
+      packages: write
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-oci-release.yml@97cf6d2c5348f202c232fd872c4d4592d430297b # v1.2.0
+    with:
+      registry-username: ${{ github.actor }}
+      image: ghcr.io/example/voice-runtime
+      version: v1.0.0
+      docker-context: .
+      dockerfile: Dockerfile
+      platforms: linux/amd64
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+      registry-read-password: ${{ secrets.GITHUB_TOKEN }}
+
+  consume:
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions: {}
+    env:
+      IMAGE_DIGEST: ${{ needs.release.outputs.image-digest }}
+      IMAGE_REFERENCE: ${{ needs.release.outputs.image-reference }}
+      SBOM_ARTIFACT: ${{ needs.release.outputs.sbom-artifact }}
+    steps:
+      - name: Record immutable release metadata
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf 'digest=%s\nsbom-artifact=%s\n' "$IMAGE_DIGEST" "$SBOM_ARTIFACT"
+      - name: Deploy only the immutable digest reference
+        id: deploy-immutable-reference
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf 'Pass this immutable reference to the deployment system: %s\n' "$IMAGE_REFERENCE"

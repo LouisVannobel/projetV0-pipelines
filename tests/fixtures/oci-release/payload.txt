@@ -1,0 +1,1 @@
+projetV0 OCI release smoke fixture
