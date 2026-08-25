@@ -323,11 +323,15 @@ $readme = Get-Content -Raw -LiteralPath 'README.md'
 foreach ($requiredDeploymentPrerequisite in @(
   'sourceType: docker',
   'identifiants de pull',
-  'GHCR privé',
-  'compte/API Dokploy dédié',
-  'permissions minimales',
+  'repository GHCR',
+  'identité CI non personnelle',
+  'révocable',
+  'limitée au projet, à l''environnement et aux services SaaS',
   'environnement GitHub `production`',
-  'protégé'
+  'branches protégées',
+  'FailureAction=rollback',
+  'Order=start-first',
+  'Parallelism=1'
 )) {
   if ($readme -notmatch [regex]::Escape($requiredDeploymentPrerequisite)) {
     throw "README omits deployment prerequisite: $requiredDeploymentPrerequisite"
