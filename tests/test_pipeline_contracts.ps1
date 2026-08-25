@@ -248,10 +248,9 @@ $containerRelease = Get-Content -Raw -LiteralPath '.github\workflows\reusable-co
 $containerBuilds = @([regex]::Matches($containerRelease, '(?m)^\s*uses:\s+docker/build-push-action@[0-9a-f]{40}'))
 if ($containerBuilds.Count -ne 1) { throw 'Container release must build exactly once before scanning its pushed digest' }
 foreach ($requiredReleaseControl in @(
-  'push: true',
-  'sbom: true',
+  'outputs: type=image,name=${{ steps.release-image.outputs.image }},push-by-digest=true,name-canonical=true,push=true',
+  'sbom: generator=docker/buildkit-syft-scanner:1.11.0@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68',
   'provenance: mode=max',
-  'tags: ${{ steps.release-image.outputs.image }}:candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}',
   'RELEASE_IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"',
   'RELEASE_DIGEST="${{ steps.build.outputs.digest }}"',
   'RELEASE_REF="${RELEASE_IMAGE}@${RELEASE_DIGEST}"',
@@ -265,8 +264,14 @@ foreach ($requiredReleaseControl in @(
 if ($containerRelease -match '(?im)(^|[^a-z])latest([^a-z]|$)') {
   throw 'Container release must not publish or scan a latest image tag'
 }
+if ($containerRelease -match '(?m)^\s*sbom:\s*true\s*$') {
+  throw 'Container release must pin its SBOM generator by version and digest'
+}
 if ($containerRelease -match '(?m)^\s*tags:\s*\$\{\{ steps\.release-image\.outputs\.image \}\}:sha-') {
   throw 'Container release must not expose its pre-scan candidate through a final-looking SHA tag'
+}
+if ($containerRelease -match '(?m)^\s*tags:\s*\$\{\{ steps\.release-image\.outputs\.image \}\}:candidate-') {
+  throw 'Container release must push only an untagged canonical digest before scanning'
 }
 
 $containerWorkflowCall = [regex]::Match($containerRelease, '(?ms)^  workflow_call:\s*$.*?(?=^permissions:|^jobs:|\z)').Value
