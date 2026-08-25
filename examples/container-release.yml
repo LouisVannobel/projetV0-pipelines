@@ -5,9 +5,36 @@ on:
     branches: ["main"]
 
 jobs:
-  release:
+  build:
     permissions:
       contents: read
       packages: write
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-container-release.yml@5d628d4ebd84088985419f1e3c4bdf7fb72907d4 # v1.3.0
+
+  deploy:
+    needs: build
+    permissions:
+      contents: read
       id-token: write
-    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-container-release.yml@aab6ec7c6201881691e38bcfb13de99514bd6fb7 # v1.1.2
+    environment: production
+    concurrency:
+      group: container-release-${{ github.repository }}-${{ vars.DOKPLOY_APPLICATION_ID }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Join private deployment tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ vars.TS_WIF_CLIENT_ID }}
+          audience: ${{ vars.TS_WIF_AUDIENCE }}
+          tags: tag:deploy
+      - name: Deploy verified digest through Dokploy
+        uses: LouisVannobel/projetV0-pipelines/.github/actions/deploy-dokploy@5d628d4ebd84088985419f1e3c4bdf7fb72907d4 # v1.3.0
+        env:
+          DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}
+          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          EXPECTED_REVISION: ${{ github.sha }}
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
+          RELEASE_REF: ${{ needs.build.outputs.release-ref }}
