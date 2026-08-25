@@ -6,13 +6,13 @@ Workflows GitHub Actions réutilisables pour les SaaS du studio.
 
 Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` et `examples/container-release.yml` vers `.github/workflows/release.yml`. Les deux workflows sont épinglés au même commit immuable :
 
-`bc5084f80c4aef7a1d1393fc3f5617fc46a6fb6d` (`v1.3.0`)
+`3835a470817c3ae253e97d7d55058f66215de9e3` (`v1.3.1`)
 
 Le SaaS fournit `package.json`, `pnpm-lock.yaml`, un Dockerfile multi-stage et les scripts pnpm `lint`, `typecheck`, `test`, `build` et `test:a11y`. Lighthouse reste opt-in. La CI publie le statut requis `CI / gate`.
 
 ## Release
 
-Le push sur `main` construit une seule image candidate GHCR au nom unique et scanne son digest immuable dans le workflow partagé. Un job `deploy` local au caller reçoit ensuite ce digest et le déploie via le tailnet Dokploy ; lui seul obtient `id-token: write` et l'environnement `production`.
+Le push sur `main` construit une seule image GHCR sans tag, puis scanne son digest immuable dans le workflow partagé. Un job `deploy` local au caller reçoit ensuite ce digest et le déploie via le tailnet Dokploy ; lui seul obtient `id-token: write` et l'environnement `production`.
 
 Configurer les variables du dépôt `DOKPLOY_APPLICATION_ID`, `DOKPLOY_URL`, `HEALTH_URL`, `TS_WIF_CLIENT_ID` et `TS_WIF_AUDIENCE`, ainsi que `DOKPLOY_API_KEY` comme secret de l'environnement `production`. Le secret reste dans le job local `deploy` et n'est jamais transmis au workflow réutilisable.
 

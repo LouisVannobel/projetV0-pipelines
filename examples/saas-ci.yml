@@ -8,4 +8,4 @@ permissions:
 
 jobs:
   ci:
-    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-saas-ci.yml@bc5084f80c4aef7a1d1393fc3f5617fc46a6fb6d # v1.3.0
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-saas-ci.yml@3835a470817c3ae253e97d7d55058f66215de9e3 # v1.3.1
