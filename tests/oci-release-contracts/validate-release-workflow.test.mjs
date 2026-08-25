@@ -79,6 +79,25 @@ rejects('rejects top-level build tags',
 rejects('rejects an indirect promote needs graph',
   '    needs:\n      - build\n      - verify',
   '    needs: verify', 'graph: promote');
+rejectsObjectMutation('rejects missing concurrency on the tag-writing promote job', (workflow) => {
+  delete workflow.jobs.promote.concurrency;
+}, 'concurrency: promote');
+rejectsObjectMutation('rejects a renamed promotion concurrency group', (workflow) => {
+  workflow.jobs.promote.concurrency.group = 'another-group';
+}, 'concurrency: promote');
+rejectsObjectMutation('rejects promotion concurrency that cancels an in-progress tag write', (workflow) => {
+  workflow.jobs.promote.concurrency['cancel-in-progress'] = true;
+}, 'concurrency: promote');
+rejectsObjectMutation('rejects promotion concurrency without a max queue', (workflow) => {
+  delete workflow.jobs.promote.concurrency.queue;
+}, 'concurrency: promote');
+rejectsObjectMutation('rejects promotion concurrency with a non-max queue', (workflow) => {
+  workflow.jobs.promote.concurrency.queue = 'single';
+}, 'concurrency: promote');
+rejectsObjectMutation('rejects serialization placed only on a non-writing job', (workflow) => {
+  workflow.jobs.build.concurrency = workflow.jobs.promote.concurrency;
+  delete workflow.jobs.promote.concurrency;
+}, 'concurrency: promote');
 rejects('rejects a job condition override',
   '  verify:\n    needs: build',
   '  verify:\n    needs: build\n    if: success()', 'bypass:');
@@ -192,5 +211,5 @@ rejectsObjectMutation('rejects a case-variant duplicate Trivy action', (workflow
   });
 }, 'Trivy: exactly one');
 rejects('rejects removal of the reserved revision-tag version guard',
-  '          [[ "$VERSION" != "sha-$GITHUB_SHA" ]]\n',
+  '          [[ ! "${VERSION,,}" =~ ^sha-[0-9a-f]{40}$ ]]\n',
   '', 'run scalar:');

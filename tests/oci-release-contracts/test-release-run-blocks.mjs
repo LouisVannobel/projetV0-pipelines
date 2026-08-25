@@ -261,6 +261,27 @@ test('release input scalar validates the supported immutable namespace', () => {
   }
 });
 
+test('release input scalar reserves every exact revision-tag spelling', () => {
+  const anotherSha = 'b'.repeat(40);
+  for (const reserved of [
+    `sha-${githubSha}`,
+    `sha-${anotherSha}`,
+    `SHA-${anotherSha.toUpperCase()}`,
+    `Sha-${anotherSha.slice(0, 20).toUpperCase()}${anotherSha.slice(20)}`
+  ]) {
+    assert.notEqual(execute('validate-inputs', { ...validInputEnvironment, VERSION: reserved }).status, 0,
+      reserved);
+  }
+  for (const allowed of [
+    `sha-${'b'.repeat(39)}`,
+    `sha-${'b'.repeat(41)}`,
+    `sha-${'g'.repeat(40)}`
+  ]) {
+    assert.equal(execute('validate-inputs', { ...validInputEnvironment, VERSION: allowed }).status, 0,
+      allowed);
+  }
+});
+
 function verifyEnvironment(rootFixture = rootValid, sbomFixture = sbomValid, provenanceFixture = provenanceValid) {
   return {
     IMAGE_REFERENCE: `${image}@${digest}`,
@@ -360,6 +381,29 @@ test('promotion rejects a version that aliases the revision destination', () => 
   const { result, log } = promotionCase('exact-absent', 'exact-absent', { VERSION: `sha-${githubSha}` });
   assert.notEqual(result.status, 0);
   assert.equal(log, '');
+});
+
+test('promotion reserves every exact revision tag while accepting near misses', () => {
+  const anotherSha = 'b'.repeat(40);
+  for (const reserved of [
+    `sha-${githubSha}`,
+    `sha-${anotherSha}`,
+    `SHA-${anotherSha.toUpperCase()}`,
+    `Sha-${anotherSha.slice(0, 20).toUpperCase()}${anotherSha.slice(20)}`
+  ]) {
+    const { result, log } = promotionCase('exact-absent', 'exact-absent', { VERSION: reserved });
+    assert.notEqual(result.status, 0, reserved);
+    assert.equal(log, '', reserved);
+  }
+  for (const allowed of [
+    `sha-${'b'.repeat(39)}`,
+    `sha-${'b'.repeat(41)}`,
+    `sha-${'g'.repeat(40)}`
+  ]) {
+    const { result, log } = promotionCase('exact-absent', 'exact-absent', { VERSION: allowed });
+    assert.equal(result.status, 0, `${allowed}: ${result.stderr}`);
+    assert.equal(createLines(log).length, 1, allowed);
+  }
 });
 
 test('result scalar validates the digest and writes exactly three outputs', () => {

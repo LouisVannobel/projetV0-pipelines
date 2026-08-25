@@ -125,9 +125,30 @@ if ($selfValidation -notmatch [regex]::Escape('uses: ./.github/workflows/reusabl
   throw 'The pipeline repository must execute its reusable repository CI locally before consumers depend on it'
 }
 $actionlintSelfActionIgnore = '^specifying action "\$/\.github/actions/deploy-dokploy" in invalid format because ref is missing\. available formats are "\{owner\}/\{repo\}@\{ref\}" or "\{owner\}/\{repo\}/\{path\}@\{ref\}"$'
+$actionlintQueueIgnore = '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
+function Test-ExactActionlintIgnores {
+  param([Parameter(Mandatory)][string]$Workflow)
+
+  $selfAssignment = "self_action_ignore='$actionlintSelfActionIgnore'"
+  $queueAssignment = "queue_ignore='$actionlintQueueIgnore'"
+  $ignoreInvocation = '-ignore "$self_action_ignore" -ignore "$queue_ignore"'
+  return @([regex]::Matches($Workflow, [regex]::Escape($selfAssignment))).Count -eq 1 `
+    -and @([regex]::Matches($Workflow, [regex]::Escape($queueAssignment))).Count -eq 1 `
+    -and @([regex]::Matches($Workflow, '(?<![A-Za-z0-9_-])-ignore(?:\s|$)')).Count -eq 2 `
+    -and @([regex]::Matches($Workflow, [regex]::Escape($ignoreInvocation))).Count -eq 1
+}
 foreach ($lintWorkflow in @($repositoryCi, $selfValidation)) {
-  if ($lintWorkflow -notmatch [regex]::Escape($actionlintSelfActionIgnore)) {
-    throw 'Actionlint must ignore only its exact unsupported self-action syntax diagnostic'
+  if (-not (Test-ExactActionlintIgnores -Workflow $lintWorkflow)) {
+    throw 'Actionlint must keep exactly the two anchored upstream-parser compatibility ignores'
+  }
+  foreach ($invalidIgnoreMutation in @(
+    $lintWorkflow.Replace("queue_ignore='$actionlintQueueIgnore'", ''),
+    $lintWorkflow.Replace($actionlintQueueIgnore, $actionlintQueueIgnore.Replace('"queue"', '"queues"')),
+    $lintWorkflow.Replace('-ignore "$self_action_ignore" -ignore "$queue_ignore"', '-ignore "$self_action_ignore" -ignore "$queue_ignore" -ignore ".*"')
+  )) {
+    if (Test-ExactActionlintIgnores -Workflow $invalidIgnoreMutation) {
+      throw 'Actionlint ignore contract accepted a missing, altered, or broader queue diagnostic ignore'
+    }
   }
 }
 
@@ -331,7 +352,7 @@ $actionlintExe = $env:ACTIONLINT_EXE
 if ($actionlintExe) {
   if (-not (Test-Path -LiteralPath $actionlintExe)) { throw "actionlint executable not found: $actionlintExe" }
   $exampleWorkflows = @(Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File | ForEach-Object FullName)
-  & $actionlintExe -ignore $actionlintSelfActionIgnore @($workflows + '.github\workflows\validate-pipelines.yml' + $exampleWorkflows)
+  & $actionlintExe -ignore $actionlintSelfActionIgnore -ignore $actionlintQueueIgnore @($workflows + '.github\workflows\validate-pipelines.yml' + $exampleWorkflows)
   if ($LASTEXITCODE -ne 0) { throw "actionlint failed with exit code $LASTEXITCODE" }
 }
 

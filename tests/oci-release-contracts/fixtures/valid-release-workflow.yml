@@ -69,7 +69,7 @@ jobs:
           [[ "$IMAGE" == "$REGISTRY/"* ]]
           [[ "$VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]
           [[ "${VERSION,,}" != "latest" ]]
-          [[ "$VERSION" != "sha-$GITHUB_SHA" ]]
+          [[ ! "${VERSION,,}" =~ ^sha-[0-9a-f]{40}$ ]]
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
         with:
           version: v0.36.1
@@ -176,6 +176,10 @@ jobs:
       - build
       - verify
     runs-on: ubuntu-24.04
+    concurrency:
+      group: projetv0-oci-promotion
+      cancel-in-progress: false
+      queue: max
     permissions:
       packages: write
     outputs:
@@ -205,7 +209,7 @@ jobs:
           [[ "$IMAGE" =~ ^[a-z0-9]+([.-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)+$ ]]
           [[ "$VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]
           [[ "${VERSION,,}" != "latest" ]]
-          [[ "$VERSION" != "sha-$GITHUB_SHA" ]]
+          [[ ! "${VERSION,,}" =~ ^sha-[0-9a-f]{40}$ ]]
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           check_existing_tag() {

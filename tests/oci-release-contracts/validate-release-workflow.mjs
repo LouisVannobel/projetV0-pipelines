@@ -244,6 +244,11 @@ function validateVerify(workflow, jobs, verify, errors) {
 }
 
 function validatePromote(workflow, promote, errors) {
+  fail(errors, sameRecord(promote.concurrency, {
+    group: 'projetv0-oci-promotion',
+    'cancel-in-progress': false,
+    queue: 'max'
+  }), 'concurrency: promote must serialize every tag write in one fixed max queue without cancellation');
   fail(errors, sameRecord(promote.env, {
     IMAGE: '${{ inputs.image }}',
     DIGEST: '${{ needs.build.outputs.image-digest }}',
