@@ -150,6 +150,12 @@ case "$endpoint" in
       malformed-image)
         printf '{"sourceType":"docker","dockerImage":"bad image with spaces","username":"APPLICATION_RESPONSE_SECRET"}\n200'
         ;;
+      wrong-repository)
+        printf '{"sourceType":"docker","dockerImage":"ghcr.io/attacker/saas@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","username":"APPLICATION_RESPONSE_SECRET"}\n200'
+        ;;
+      bootstrap-tag)
+        printf '{"sourceType":"docker","dockerImage":"ghcr.io/example/saas:bootstrap","username":"APPLICATION_RESPONSE_SECRET"}\n200'
+        ;;
       *)
         printf '{"sourceType":"docker","dockerImage":"ghcr.io/example/saas@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","username":"APPLICATION_RESPONSE_SECRET"}\n200'
         ;;
@@ -232,13 +238,18 @@ case "$endpoint" in
     printf '{"ok":true,"detail":"%s"}\n%s' "$api_detail" "$api_status"
     ;;
   /application.deploy)
+    count_file="$FAKE_CURL_STATE/deploy-count"
+    count=0
+    [[ -f "$count_file" ]] && count="$(<"$count_file")"
+    count=$((count + 1))
+    printf '%s' "$count" > "$count_file"
     printf 'application.deploy %s\n' "$body" >> "$FAKE_CURL_STATE/requests"
     api_status=200
     api_detail=API_RESPONSE_SECRET
-    if [[ "$FAKE_CURL_SCENARIO" == deploy-redirect-302 ]]; then
+    if [[ "$FAKE_CURL_SCENARIO" == deploy-redirect-302 && "$count" -eq 1 ]]; then
       api_status=302
       api_detail=DEPLOY_REDIRECT_RESPONSE_SECRET
-    elif [[ "$FAKE_CURL_SCENARIO" == deploy-post-failure || "$FAKE_CURL_SCENARIO" == recovery-failure ]]; then
+    elif [[ ("$FAKE_CURL_SCENARIO" == deploy-post-failure || "$FAKE_CURL_SCENARIO" == recovery-failure) && "$count" -eq 1 ]]; then
       api_status=500
       api_detail=DEPLOY_FAILURE_RESPONSE_SECRET
     fi
@@ -328,7 +339,7 @@ function Invoke-DeployScenario {
   )
 
   Remove-Item -LiteralPath (Join-Path $stateDir 'requests') -Force -ErrorAction SilentlyContinue
-  foreach ($counter in @('application-one-count', 'deployment-count', 'health-count', 'update-count')) {
+  foreach ($counter in @('application-one-count', 'deployment-count', 'health-count', 'update-count', 'deploy-count')) {
     Remove-Item -LiteralPath (Join-Path $stateDir $counter) -Force -ErrorAction SilentlyContinue
   }
 
@@ -385,6 +396,7 @@ try {
   $newUpdate = 'application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
   $restoreUpdate = 'application.update {"applicationId":"app_123-ABC","dockerImage":"ghcr.io/example/saas@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}'
   $deployRequest = 'application.deploy {"applicationId":"app_123-ABC","title":"github:example/saas:123456:2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+  $recoveryDeployRequest = 'application.deploy {"applicationId":"app_123-ABC","title":"github-recovery:example/saas:123456:2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
 
   $invalid = Invoke-DeployScenario -Scenario success -ReleaseRef 'ghcr.io/example/saas:latest'
   Assert-True ($invalid.ExitCode -ne 0) 'Malformed digest must fail'
@@ -427,6 +439,14 @@ try {
     Assert-True ($preflightReject.Output -notmatch 'APPLICATION_RESPONSE_SECRET|dddddddd|DOKPLOY_API_KEY_SECRET') "Application preflight '$invalidApplication' leaked its body or API key"
   }
 
+  $wrongRepository = Invoke-DeployScenario -Scenario wrong-repository
+  Assert-True ($wrongRepository.ExitCode -ne 0) 'Application bound to another GHCR repository must fail'
+  Assert-True (($wrongRepository.Requests -join ',') -eq 'application.one') 'Wrong application repository must cause zero mutations'
+  Assert-True ($wrongRepository.Output -notmatch 'attacker|dddddddd|APPLICATION_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Wrong repository preflight leaked its body or API key'
+
+  $bootstrapTag = Invoke-DeployScenario -Scenario bootstrap-tag
+  Assert-True ($bootstrapTag.ExitCode -eq 0) "Same-repository bootstrap tag must be accepted: $($bootstrapTag.Output)"
+
   $preflightTransient = Invoke-DeployScenario -Scenario preflight-transient
   Assert-True ($preflightTransient.ExitCode -eq 0) "Transient application preflight did not recover: $($preflightTransient.Output)"
   Assert-True (($preflightTransient.Requests | Select-Object -First 3) -join ',' -eq 'application.one,application.one,application.one') 'Only the initial application.one GET may be retried'
@@ -460,14 +480,14 @@ try {
     $updateFailure = Invoke-DeployScenario -Scenario $ambiguousUpdateFailure.Scenario
     Assert-True ($updateFailure.ExitCode -ne 0) "Ambiguous application update '$($ambiguousUpdateFailure.Scenario)' must fail"
     Assert-True ($updateFailure.Output -match [regex]::Escape($ambiguousUpdateFailure.Message)) "Ambiguous application update '$($ambiguousUpdateFailure.Scenario)' must preserve its original failure"
-    Assert-True (($updateFailure.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $restoreUpdate) -join ',')) "Ambiguous application update '$($ambiguousUpdateFailure.Scenario)' must restore exactly once without deploy/poll/health"
+    Assert-True (($updateFailure.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $restoreUpdate, $recoveryDeployRequest) -join ',')) "Ambiguous application update '$($ambiguousUpdateFailure.Scenario)' must restore and redeploy exactly once without poll/health"
     Assert-True ($updateFailure.Output -notmatch "$($ambiguousUpdateFailure.Secret)|DOKPLOY_API_KEY_SECRET") "Ambiguous application update '$($ambiguousUpdateFailure.Scenario)' leaked its body or API key"
   }
 
   foreach ($deployFailureScenario in @('deploy-redirect-302', 'deploy-post-failure')) {
     $deployFailure = Invoke-DeployScenario -Scenario $deployFailureScenario
     Assert-True ($deployFailure.ExitCode -ne 0) "Deploy failure '$deployFailureScenario' must fail"
-    Assert-True (($deployFailure.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, $restoreUpdate) -join ',')) "Deploy failure '$deployFailureScenario' must restore once without poll/health"
+    Assert-True (($deployFailure.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, $restoreUpdate, $recoveryDeployRequest) -join ',')) "Deploy failure '$deployFailureScenario' must restore and redeploy once without poll/health"
     Assert-True ($deployFailure.Output -notmatch 'DEPLOY_REDIRECT_RESPONSE_SECRET|DEPLOY_FAILURE_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') "Deploy failure '$deployFailureScenario' leaked its body or API key"
   }
 
@@ -480,8 +500,8 @@ try {
     $failed = Invoke-DeployScenario -Scenario $terminalFailure.Scenario
     Assert-True ($failed.ExitCode -ne 0) "Deployment failure '$($terminalFailure.Scenario)' must fail"
     Assert-True ($failed.Output -match [regex]::Escape($terminalFailure.Message)) "Deployment failure '$($terminalFailure.Scenario)' lost its original status"
-    Assert-True ($failed.Requests[-1] -eq $restoreUpdate) "Deployment failure '$($terminalFailure.Scenario)' must restore the prior image"
-    Assert-True (@($failed.Requests | Where-Object { $_ -like 'application.deploy *' }).Count -eq 1) "Deployment failure '$($terminalFailure.Scenario)' must not retry deploy POST"
+    Assert-True (($failed.Requests | Select-Object -Last 2) -join ',' -eq (@($restoreUpdate, $recoveryDeployRequest) -join ',')) "Deployment failure '$($terminalFailure.Scenario)' must restore and redeploy the prior image"
+    Assert-True (@($failed.Requests | Where-Object { $_ -like 'application.deploy *' }).Count -eq 2) "Deployment failure '$($terminalFailure.Scenario)' must issue only the original and recovery deploy POSTs"
   }
 
   foreach ($healthFailureScenario in @('health-failure', 'redirect-301', 'redirect-302', 'invalid-health-json', 'old-revision')) {
@@ -489,7 +509,7 @@ try {
     Assert-True ($healthFailed.ExitCode -ne 0) "Health convergence '$healthFailureScenario' must exhaust and fail"
     Assert-True ($healthFailed.Output -match 'did not converge') "Health convergence '$healthFailureScenario' must report exhaustion"
     Assert-True (@($healthFailed.Requests | Where-Object { $_ -eq 'health' }).Count -eq 3) "Health convergence '$healthFailureScenario' must use the configured attempt bound"
-    Assert-True ($healthFailed.Requests[-1] -eq $restoreUpdate) "Health convergence '$healthFailureScenario' must restore the prior image"
+    Assert-True (($healthFailed.Requests | Select-Object -Last 2) -join ',' -eq (@($restoreUpdate, $recoveryDeployRequest) -join ',')) "Health convergence '$healthFailureScenario' must restore and redeploy the prior image"
     Assert-True ($healthFailed.Output -notmatch 'HEALTH_RESPONSE_SECRET|cccccccc|DOKPLOY_API_KEY_SECRET') "Health convergence '$healthFailureScenario' leaked a body or key"
   }
 
@@ -505,7 +525,7 @@ try {
   Assert-True ($recoveryFailure.Output -match 'application.deploy') 'Failed recovery must retain the original deploy failure'
   Assert-True ($recoveryFailure.Output -match 'Desired-image recovery failed') 'Failed recovery must be explicit'
   Assert-True ($recoveryFailure.Output -notmatch 'RECOVERY_RESPONSE_SECRET|DEPLOY_FAILURE_RESPONSE_SECRET|DOKPLOY_API_KEY_SECRET') 'Failed recovery leaked a response or key'
-  Assert-True (($recoveryFailure.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, $restoreUpdate) -join ',')) 'Recovery failure must attempt restore exactly once'
+  Assert-True (($recoveryFailure.Requests -join ',') -eq (@('application.one', 'deployment.all', $newUpdate, $deployRequest, $restoreUpdate) -join ',')) 'Recovery update failure must stop before recovery deploy'
 
   Write-Output 'DOKPLOY_DEPLOY_TESTS_OK'
 } finally {
