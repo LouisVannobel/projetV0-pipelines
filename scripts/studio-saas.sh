@@ -10,6 +10,13 @@ ENVIRONMENT_NAME=production
 
 die() { printf 'studio-saas: %s\n' "$*" >&2; exit 1; }
 
+version() {
+  local digest
+  digest="$(sha256sum "${BASH_SOURCE[0]}" | awk '{print $1}')"
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die 'cannot identify installed helper bytes'
+  printf 'STUDIO_SAAS_VERSION sha256=%s\n' "$digest"
+}
+
 validate_slug() {
   [[ "$1" =~ ^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$ ]] ||
     die 'slug must contain 1-40 lowercase letters, digits, or internal hyphens'
@@ -122,7 +129,7 @@ login() {
 }
 
 provision() {
-  local admin_cookie member_cookie response project_id environment_id project_count environment_count current_image application_count
+  local admin_cookie member_cookie response project_id environment_id project_count environment_count current_image application_count matched_environment
   local member_count member_body permission_body key_body organization_id key_status other_application negative_body
   require_root
   for command_name in curl jq openssl flock docker tailscale ss; do command -v "$command_name" >/dev/null || die "$command_name is unavailable"; done
@@ -154,12 +161,29 @@ provision() {
   api_cookie GET "/project.one?projectId=$project_id" '' "$response" "$admin_cookie"
   if [[ -z "$APPLICATION_ID" ]]; then
     application_count="$(jq --arg slug "$SLUG" '[.environments[].applications[]? | select(.name==$slug or .appName==$slug)] | length' "$response")"
-    [[ "$application_count" == 0 ]] || die 'pre-existing Dokploy application collides with requested slug'
-    member_body="$(jq -cn --arg slug "$SLUG" --arg environment "$environment_id" '{name:$slug,appName:$slug,environmentId:$environment,sourceType:"docker"}')"
-    api_cookie POST /application.create "$member_body" "$response" "$admin_cookie"
-    APPLICATION_ID="$(jq -r '.applicationId // empty' "$response")"
-    APP_NAME="$(jq -r '.appName // empty' "$response")"
-    [[ "$APPLICATION_ID" =~ ^[A-Za-z0-9_-]+$ ]] || die 'Dokploy returned an invalid application ID'
+    case "$application_count" in
+      0)
+        member_body="$(jq -cn --arg slug "$SLUG" --arg environment "$environment_id" '{name:$slug,appName:$slug,environmentId:$environment,sourceType:"docker"}')"
+        api_cookie POST /application.create "$member_body" "$response" "$admin_cookie"
+        APPLICATION_ID="$(jq -r '.applicationId // empty' "$response")"
+        APP_NAME="$(jq -r '.appName // empty' "$response")"
+        [[ "$APPLICATION_ID" =~ ^[A-Za-z0-9_-]+$ ]] || die 'Dokploy returned an invalid application ID'
+        ;;
+      1)
+        APPLICATION_ID="$(jq -r --arg slug "$SLUG" '.environments[].applications[]? | select(.name==$slug or .appName==$slug) | .applicationId' "$response")"
+        matched_environment="$(jq -r --arg slug "$SLUG" '.environments[] | select(any(.applications[]?; .name==$slug or .appName==$slug)) | .environmentId' "$response")"
+        [[ "$matched_environment" == "$environment_id" ]] || die 'ambiguous Dokploy application matches outside production environment'
+        api_cookie GET "/application.one?applicationId=$APPLICATION_ID" '' "$response" "$admin_cookie"
+        [[ "$(jq -r '.name // empty' "$response")" == "$SLUG" ]] || die 'ambiguous Dokploy application matches another logical name'
+        [[ "$(jq -r '.environmentId // empty' "$response")" == "$environment_id" ]] || die 'ambiguous Dokploy application matches another environment'
+        [[ "$(jq -r '.sourceType // empty' "$response")" == docker ]] || die 'ambiguous Dokploy application is not a Docker source'
+        current_image="$(jq -r '.dockerImage // empty' "$response")"
+        [[ -z "$current_image" || "$current_image" == "ghcr.io/${OWNER,,}/$SLUG:"* || "$current_image" == "ghcr.io/${OWNER,,}/$SLUG@sha256:"* ]] ||
+          die 'ambiguous Dokploy application points to another repository'
+        APP_NAME="$(jq -r '.appName // empty' "$response")"
+        ;;
+      *) die 'ambiguous Dokploy application matches are duplicated' ;;
+    esac
   else
     api_cookie GET "/application.one?applicationId=$APPLICATION_ID" '' "$response" "$admin_cookie"
     [[ "$(jq -r '.name // empty' "$response")" == "$SLUG" ]] || die 'stored Dokploy application belongs to another slug'
@@ -219,12 +243,15 @@ provision() {
   fi
 
   api_cookie GET "/project.one?projectId=$project_id" '' "$response" "$admin_cookie"
-  other_application="$(jq -r --arg own "$APPLICATION_ID" '[.environments[].applications[]? | select(.applicationId!=$own)] | if length>0 then .[0].applicationId else empty end' "$response")"
+  other_application="$(jq -r --arg environment "$environment_id" --arg own "$APPLICATION_ID" '[.environments[] | select(.environmentId==$environment) | .applications[]? | select(.applicationId!=$own)] | if length>0 then .[0].applicationId else empty end' "$response")"
   [[ -n "$other_application" ]] || die 'no second real application exists for the isolation test'
   key_status="$(api_key_status GET "/application.one?applicationId=$APPLICATION_ID" '' "$response" "$API_KEY")"
   [[ "$key_status" == 200 ]] || die 'deployment key cannot read its application'
   api_key_status POST /application.update "$(jq -cn --arg application "$APPLICATION_ID" --arg image "$current_image" '{applicationId:$application,dockerImage:$image}')" "$response" "$API_KEY" | grep -qx 200 || die 'deployment key cannot update its application'
   api_key_status GET "/application.one?applicationId=$other_application" '' "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can access another application'
+  api_key_status POST /application.update "$(jq -cn --arg application "$other_application" '{applicationId:$application,dockerImage:"ghcr.io/louisvannobel/forbidden@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}')" "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can update another application'
+  api_key_status POST /application.deploy "$(jq -cn --arg application "$other_application" '{applicationId:$application,title:"forbidden"}')" "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can deploy another application'
+  api_key_status POST /application.delete "$(jq -cn --arg application "$other_application" '{applicationId:$application}')" "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can delete another application'
   negative_body="$(jq -cn --arg environment "$environment_id" '{name:"forbidden",appName:"forbidden",environmentId:$environment,sourceType:"docker"}')"
   api_key_status POST /application.create "$negative_body" "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can create applications'
   api_key_status POST /environment.create "$(jq -cn --arg project "$project_id" '{name:"forbidden",projectId:$project}')" "$response" "$API_KEY" | grep -qx 401 || die 'deployment key can create environments'
@@ -239,45 +266,62 @@ provision() {
 }
 
 inspect_runtime() {
-  local spec image memory cpu managed replicas failure order parallelism containers container health revision labels
+  local spec image memory cpu managed replicas failure order parallelism update_delay update_monitor max_failure_ratio containers container health health_body revision labels endpoint_ports serve_status serve_key expected_proxy
   require_root
   load_state
   [[ -n "$APPLICATION_ID" && -n "$PUBLISHED_PORT" && -n "$HEALTH_PORT" ]] || die 'SaaS state is incomplete'
   [[ "$APP_NAME" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || die 'stored Dokploy application service name is invalid'
-  spec="$(docker service inspect "$APP_NAME" --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}|{{.Spec.TaskTemplate.Resources.Limits.MemoryBytes}}|{{.Spec.TaskTemplate.Resources.Limits.NanoCPUs}}|{{index .Spec.TaskTemplate.ContainerSpec.Labels "studio.projetv0.managed"}}|{{.Spec.Mode.Replicated.Replicas}}|{{.Spec.UpdateConfig.FailureAction}}|{{.Spec.UpdateConfig.Order}}|{{.Spec.UpdateConfig.Parallelism}}')" || die 'SaaS service is absent'
-  IFS='|' read -r image memory cpu managed replicas failure order parallelism <<<"$spec"
+  spec="$(docker service inspect "$APP_NAME" --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}|{{.Spec.TaskTemplate.Resources.Limits.MemoryBytes}}|{{.Spec.TaskTemplate.Resources.Limits.NanoCPUs}}|{{index .Spec.TaskTemplate.ContainerSpec.Labels "studio.projetv0.managed"}}|{{.Spec.Mode.Replicated.Replicas}}|{{.Spec.UpdateConfig.FailureAction}}|{{.Spec.UpdateConfig.Order}}|{{.Spec.UpdateConfig.Parallelism}}|{{.Spec.UpdateConfig.Delay}}|{{.Spec.UpdateConfig.Monitor}}|{{.Spec.UpdateConfig.MaxFailureRatio}}')" || die 'SaaS service is absent'
+  IFS='|' read -r image memory cpu managed replicas failure order parallelism update_delay update_monitor max_failure_ratio <<<"$spec"
   [[ "$image" =~ ^ghcr\.io/louisvannobel/$SLUG@sha256:[0-9a-f]{64}$ ]] || die 'SaaS service image is not the expected immutable digest'
-  [[ "$memory|$cpu|$managed|$replicas|$failure|$order|$parallelism" == '536870912|1000000000|true|1|rollback|start-first|1' ]] || die 'SaaS service policy drifted'
+  [[ "$memory|$cpu|$managed|$replicas|$failure|$order|$parallelism|$update_delay|$update_monitor|$max_failure_ratio" == '536870912|1000000000|true|1|rollback|start-first|1|5000000000|30000000000|0' ]] || die 'SaaS service policy drifted'
+  endpoint_ports="$(docker service inspect "$APP_NAME" --format '{{json .Endpoint.Spec.Ports}}')"
+  jq -e --argjson published "$PUBLISHED_PORT" 'length==1 and .[0].Protocol=="tcp" and .[0].TargetPort==3000 and .[0].PublishedPort==$published and .[0].PublishMode=="ingress"' <<<"$endpoint_ports" >/dev/null || die 'SaaS published port policy drifted'
   mapfile -t containers < <(docker ps --filter "label=com.docker.swarm.service.name=$APP_NAME" --filter status=running --format '{{.ID}}')
   [[ ${#containers[@]} -eq 1 ]] || die 'SaaS does not have exactly one running container'
   container="${containers[0]}"
   health="$(docker inspect "$container" --format '{{if .Config.Healthcheck}}{{.State.Health.Status}}{{else}}absent{{end}}')"
   [[ "$health" == healthy ]] || die 'SaaS container is not healthy'
-  revision="$(curl -fsS --connect-timeout 5 --max-time 20 "http://127.0.0.1:$PUBLISHED_PORT/health" | jq -r '.revision // empty')"
+  health_body="$(curl -fsS --connect-timeout 5 --max-time 20 "http://127.0.0.1:$PUBLISHED_PORT/health")"
+  [[ "$(jq -r '.status // empty' <<<"$health_body")" == ok ]] || die 'SaaS health status is not ready'
+  revision="$(jq -r '.revision // empty' <<<"$health_body")"
   [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || die 'SaaS health revision is invalid'
   labels="$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .Config.Labels "org.opencontainers.image.source"}}')"
   [[ "$labels" == "$revision|https://github.com/$OWNER/$SLUG" ]] || die 'SaaS OCI labels do not match runtime health'
-  tailscale serve status --json | grep -Eq "[:\"]$HEALTH_PORT([/\"]|$)" || die 'SaaS private health route is absent'
+  serve_status="$(tailscale serve status --json)"
+  serve_key="ops01.tail87a1b6.ts.net:$HEALTH_PORT"
+  expected_proxy="http://127.0.0.1:$PUBLISHED_PORT"
+  jq -e --arg port "$HEALTH_PORT" --arg key "$serve_key" --arg proxy "$expected_proxy" '.TCP[$port].HTTPS==true and .Web[$key].Handlers["/"].Proxy==$proxy' <<<"$serve_status" >/dev/null || die 'SaaS private health route is absent or drifted'
   printf 'SAAS_RUNTIME_OK slug=%s application=%s image=%s health=https://ops01.tail87a1b6.ts.net:%s/health\n' "$SLUG" "$APPLICATION_ID" "$image" "$HEALTH_PORT"
 }
 
 command_name="${1:-}"
 REQUESTED_SLUG="${2:-}"
 case "$command_name" in
-  validate-slug) validate_slug "$REQUESTED_SLUG" ;;
+  version)
+    [[ $# -eq 1 ]] || die 'usage: studio-saas version'
+    version
+    ;;
+  validate-slug)
+    [[ $# -eq 2 ]] || die 'usage: studio-saas validate-slug <slug>'
+    validate_slug "$REQUESTED_SLUG"
+    ;;
   provision)
+    [[ $# -eq 2 ]] || die 'usage: studio-saas provision <slug>'
     validate_slug "$REQUESTED_SLUG"
     SLUG="$REQUESTED_SLUG"
     STATE_FILE="$STATE_DIR/$SLUG.env"
     provision
     ;;
   inspect)
+    [[ $# -eq 2 ]] || die 'usage: studio-saas inspect <slug>'
     validate_slug "$REQUESTED_SLUG"
     SLUG="$REQUESTED_SLUG"
     STATE_FILE="$STATE_DIR/$SLUG.env"
     inspect_runtime
     ;;
   secret)
+    [[ $# -eq 2 ]] || die 'usage: studio-saas secret <slug>'
     require_root
     validate_slug "$REQUESTED_SLUG"
     SLUG="$REQUESTED_SLUG"
@@ -286,5 +330,5 @@ case "$command_name" in
     [[ -n "$API_KEY" ]] || die 'deployment API key is unavailable'
     printf '%s' "$API_KEY"
     ;;
-  *) die 'usage: studio-saas {validate-slug|provision|inspect|secret} <slug>' ;;
+  *) die 'usage: studio-saas {version|validate-slug|provision|inspect|secret} [slug]' ;;
 esac

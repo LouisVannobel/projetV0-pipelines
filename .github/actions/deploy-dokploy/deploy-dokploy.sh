@@ -60,9 +60,14 @@ if policy == "dokploy" and parts.query:
 
 validate_https_url "$DOKPLOY_URL" dokploy || fail 'DOKPLOY_URL must have a valid HTTPS authority without userinfo, query, or fragment'
 validate_https_url "$HEALTH_URL" health || fail 'HEALTH_URL must have a valid HTTPS authority without userinfo or fragment'
+[[ "$DOKPLOY_URL" == 'https://ops01.tail87a1b6.ts.net:8442/api' ]] || fail 'DOKPLOY_URL must be the exact private ops01 API endpoint'
+[[ "$HEALTH_URL" =~ ^https://ops01\.tail87a1b6\.ts\.net:(8445|85[0-9]{2})/health$ ]] || fail 'HEALTH_URL must be an allocated private ops01 health endpoint'
 [[ "$DOKPLOY_APPLICATION_ID" =~ ^[A-Za-z0-9_-]+$ ]] || fail 'DOKPLOY_APPLICATION_ID contains unsupported characters'
-[[ "$RELEASE_REF" =~ ^[a-z0-9][a-z0-9._:-]*(/[a-z0-9._-]+)+@sha256:[a-f0-9]{64}$ ]] || fail 'RELEASE_REF must be an immutable image digest'
 [[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail 'GITHUB_REPOSITORY is invalid'
+expected_release_repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+release_repository="${RELEASE_REF%@sha256:*}"
+release_digest="${RELEASE_REF##*@}"
+[[ "$release_repository" == "$expected_release_repository" && "$release_digest" =~ ^sha256:[a-f0-9]{64}$ ]] || fail 'RELEASE_REF must be the triggering repository immutable digest'
 [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]] || fail 'GITHUB_RUN_ID must be a positive integer'
 [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || fail 'GITHUB_RUN_ATTEMPT must be a positive integer'
 [[ "$EXPECTED_REVISION" =~ ^[a-f0-9]{40}$ ]] || fail 'EXPECTED_REVISION must be a full lowercase Git commit SHA'
@@ -74,6 +79,8 @@ poll_seconds="${DOKPLOY_DEPLOY_POLL_SECONDS:-5}"
 health_max_attempts="${DOKPLOY_HEALTH_MAX_ATTEMPTS:-12}"
 health_retry_seconds="${DOKPLOY_HEALTH_RETRY_SECONDS:-5}"
 health_success_checks="${DOKPLOY_HEALTH_SUCCESS_CHECKS:-7}"
+forward_deadline_seconds="${DOKPLOY_FORWARD_DEADLINE_SECONDS:-600}"
+recovery_deadline_seconds="${DOKPLOY_RECOVERY_DEADLINE_SECONDS:-300}"
 [[ "$preflight_max_attempts" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_PREFLIGHT_MAX_ATTEMPTS must be a positive integer'
 [[ "$preflight_retry_seconds" =~ ^[0-9]+$ ]] || fail 'DOKPLOY_PREFLIGHT_RETRY_SECONDS must be a non-negative integer'
 [[ "$max_polls" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_DEPLOY_MAX_POLLS must be a positive integer'
@@ -82,11 +89,17 @@ health_success_checks="${DOKPLOY_HEALTH_SUCCESS_CHECKS:-7}"
 [[ "$health_retry_seconds" =~ ^[0-9]+$ ]] || fail 'DOKPLOY_HEALTH_RETRY_SECONDS must be a non-negative integer'
 [[ "$health_success_checks" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_HEALTH_SUCCESS_CHECKS must be a positive integer'
 ((health_success_checks <= health_max_attempts)) || fail 'DOKPLOY_HEALTH_SUCCESS_CHECKS must not exceed DOKPLOY_HEALTH_MAX_ATTEMPTS'
+[[ "$forward_deadline_seconds" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_FORWARD_DEADLINE_SECONDS must be a positive integer'
+[[ "$recovery_deadline_seconds" =~ ^[1-9][0-9]*$ ]] || fail 'DOKPLOY_RECOVERY_DEADLINE_SECONDS must be a positive integer'
 
 dokploy_url="${DOKPLOY_URL%/}"
-release_digest="${RELEASE_REF##*@}"
 deployment_title="github:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}:${release_digest}"
 recovery_deployment_title="github-recovery:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}:${release_digest}"
+DOKPLOY_HEADER_FILE="$(mktemp)"
+chmod 0600 "$DOKPLOY_HEADER_FILE"
+printf 'x-api-key: %s\n' "$DOKPLOY_API_KEY" >"$DOKPLOY_HEADER_FILE"
+unset DOKPLOY_API_KEY
+trap 'rm -f -- "$DOKPLOY_HEADER_FILE"' EXIT
 api_request() {
   local method="$1"
   local endpoint="$2"
@@ -102,13 +115,18 @@ api_request() {
     --max-time 20
     --max-redirs 0
     --write-out $'\n%{http_code}'
-    --header "x-api-key: ${DOKPLOY_API_KEY}"
+    --header "@${DOKPLOY_HEADER_FILE}"
     --header 'Content-Type: application/json'
   )
   if [[ -n "$body" ]]; then
-    args+=(--data "$body")
+    args+=(--data-binary @-)
   fi
-  if ! exchange="$(curl "${args[@]}" "${dokploy_url}${endpoint}" 2>/dev/null)"; then
+  if [[ -n "$body" ]]; then
+    exchange="$(curl "${args[@]}" "${dokploy_url}${endpoint}" 2>/dev/null <<<"$body")" || {
+      printf 'Dokploy API request failed: %s\n' "$endpoint" >&2
+      return 1
+    }
+  elif ! exchange="$(curl "${args[@]}" "${dokploy_url}${endpoint}" 2>/dev/null)"; then
     printf 'Dokploy API request failed: %s\n' "$endpoint" >&2
     return 1
   fi
@@ -171,10 +189,11 @@ print(json.dumps(
 recovery_armed=false
 recovery_running=false
 restore_update_body=''
+prior_revision=''
 recover_desired_image() {
   local original_status=$?
-  local recovery_deploy_body
-  trap - EXIT
+  local recovery_deploy_body recovery_snapshot recovery_previous recovery_previous_id=''
+  trap 'rm -f -- "$DOKPLOY_HEADER_FILE"' EXIT
   if [[ "$original_status" -eq 0 || "$recovery_armed" != true || "$recovery_running" == true ]]; then
     exit "$original_status"
   fi
@@ -183,10 +202,26 @@ recover_desired_image() {
   recovery_armed=false
   if ! api_request POST '/application.update' "$restore_update_body" >/dev/null; then
     printf 'Desired-image recovery failed\n' >&2
+  elif [[ -z "$prior_revision" ]]; then
+    printf 'Desired image reset; no prior healthy release existed\n' >&2
   else
+    recovery_snapshot="$(api_request GET "/deployment.all?applicationId=${DOKPLOY_APPLICATION_ID}")" || {
+      printf 'Desired-image recovery failed\n' >&2
+      exit "$original_status"
+    }
+    recovery_previous="$(newest_deployment "$recovery_snapshot")"
+    if [[ "$recovery_previous" != '__NONE__' ]]; then
+      IFS=$'\t' read -r recovery_previous_id _ <<< "$recovery_previous"
+    fi
     recovery_deploy_body="{\"applicationId\":\"${DOKPLOY_APPLICATION_ID}\",\"title\":\"${recovery_deployment_title}\"}"
     if ! api_request POST '/application.deploy' "$recovery_deploy_body" >/dev/null; then
       printf 'Desired-image recovery failed\n' >&2
+    elif ! wait_for_correlated_deployment "$recovery_deployment_title" "$recovery_previous_id" "$recovery_deadline_seconds"; then
+      printf 'Desired-image recovery failed\n' >&2
+    elif ! wait_for_health_revision "$prior_revision"; then
+      printf 'Desired-image recovery failed\n' >&2
+    else
+      printf 'Desired-image recovery completed\n' >&2
     fi
   fi
   exit "$original_status"
@@ -250,7 +285,25 @@ else:
   printf '%s' "$parsed"
 }
 
-health_matches_expected_revision() {
+wait_for_correlated_deployment() {
+  local expected_title="$1" previous_id="$2" deadline_seconds="$3"
+  local started=$SECONDS poll deployments correlated correlated_id correlated_status
+  for ((poll = 1; poll <= max_polls && SECONDS - started < deadline_seconds; poll++)); do
+    deployments="$(api_request GET "/deployment.all?applicationId=${DOKPLOY_APPLICATION_ID}")" || return 1
+    correlated="$(correlated_deployment "$deployments" "$expected_title" "$previous_id")" || return 1
+    if [[ "$correlated" != '__NONE__' ]]; then
+      IFS=$'\t' read -r correlated_id correlated_status <<< "$correlated"
+      case "$correlated_status" in
+        done) return 0 ;;
+        error|cancelled) return 1 ;;
+      esac
+    fi
+    if ((poll < max_polls)); then sleep "$poll_seconds"; fi
+  done
+  return 1
+}
+
+read_health_revision() {
   local actual_revision
   local health_body
   local health_exchange
@@ -275,13 +328,34 @@ import json
 import sys
 
 value = json.load(sys.stdin)
-if not isinstance(value, dict) or not isinstance(value.get("revision"), str):
-    raise ValueError("health response has no revision")
+if not isinstance(value, dict) or value.get("status") != "ok" or not isinstance(value.get("revision"), str):
+    raise ValueError("health response is not ready")
 print(value["revision"])
 ' <<< "$health_body" 2>/dev/null)"; then
     return 1
   fi
-  [[ "$actual_revision" == "$EXPECTED_REVISION" ]]
+  [[ "$actual_revision" =~ ^[0-9a-f]{40}$ ]] || return 1
+  printf '%s' "$actual_revision"
+}
+
+health_matches_revision() {
+  local expected_revision="$1" actual_revision
+  actual_revision="$(read_health_revision)" || return 1
+  [[ "$actual_revision" == "$expected_revision" ]]
+}
+
+wait_for_health_revision() {
+  local expected_revision="$1" consecutive=0 attempt
+  for ((attempt = 1; attempt <= health_max_attempts; attempt++)); do
+    if health_matches_revision "$expected_revision"; then
+      consecutive=$((consecutive + 1))
+      if ((consecutive >= health_success_checks)); then return 0; fi
+    else
+      consecutive=0
+    fi
+    if ((attempt < health_max_attempts)); then sleep "$health_retry_seconds"; fi
+  done
+  return 1
 }
 
 application_response=''
@@ -300,6 +374,17 @@ done
 prior_image="$(parse_application_contract "$application_response")"
 desired_update_body="$(application_update_body "$RELEASE_REF")"
 restore_update_body="$(application_update_body "$prior_image")"
+if [[ "$prior_image" == *@sha256:* ]]; then
+  prior_health_ok=false
+  for ((attempt = 1; attempt <= preflight_max_attempts; attempt++)); do
+    if prior_revision="$(read_health_revision)"; then
+      prior_health_ok=true
+      break
+    fi
+    if ((attempt < preflight_max_attempts)); then sleep "$preflight_retry_seconds"; fi
+  done
+  [[ "$prior_health_ok" == true ]] || fail 'Existing immutable release is not healthy before deployment'
+fi
 
 deployments="$(api_request GET "/deployment.all?applicationId=${DOKPLOY_APPLICATION_ID}")" || exit 1
 previous="$(newest_deployment "$deployments")"
@@ -316,7 +401,8 @@ deploy_body="{\"applicationId\":\"${DOKPLOY_APPLICATION_ID}\",\"title\":\"${depl
 api_request POST '/application.deploy' "$deploy_body" >/dev/null || exit 1
 
 deployment_done=false
-for ((poll = 1; poll <= max_polls; poll++)); do
+forward_started=$SECONDS
+for ((poll = 1; poll <= max_polls && SECONDS - forward_started < forward_deadline_seconds; poll++)); do
   deployments="$(api_request GET "/deployment.all?applicationId=${DOKPLOY_APPLICATION_ID}")" || exit 1
   correlated="$(correlated_deployment "$deployments" "$deployment_title" "$previous_id")"
   if [[ "$correlated" != '__NONE__' ]]; then
@@ -338,24 +424,9 @@ done
 
 [[ "$deployment_done" == true ]] || fail 'Timed out waiting for a new Dokploy deployment'
 
-health_converged=false
-health_consecutive=0
-for ((attempt = 1; attempt <= health_max_attempts; attempt++)); do
-  if health_matches_expected_revision; then
-    health_consecutive=$((health_consecutive + 1))
-    if ((health_consecutive >= health_success_checks)); then
-      health_converged=true
-      break
-    fi
-  else
-    health_consecutive=0
-  fi
-  if ((attempt < health_max_attempts)); then
-    sleep "$health_retry_seconds"
-  fi
-done
-[[ "$health_converged" == true ]] || fail 'External health did not converge and remain healthy through stabilization window'
+wait_for_health_revision "$EXPECTED_REVISION" || fail 'External health did not converge and remain healthy through stabilization window'
 
 recovery_armed=false
 trap - EXIT
+rm -f -- "$DOKPLOY_HEADER_FILE"
 printf 'DOKPLOY_DEPLOY_OK application=%s image=%s\n' "$DOKPLOY_APPLICATION_ID" "$RELEASE_REF"

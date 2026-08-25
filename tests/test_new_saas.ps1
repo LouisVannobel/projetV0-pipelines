@@ -3,9 +3,11 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $localScript = Join-Path $root 'scripts\new-saas.ps1'
 $remoteScript = Join-Path $root 'scripts\studio-saas.sh'
+$installerScript = Join-Path $root 'scripts\install-studio-saas.ps1'
 
 if (-not (Test-Path -LiteralPath $localScript)) { throw 'Missing scripts/new-saas.ps1' }
 if (-not (Test-Path -LiteralPath $remoteScript)) { throw 'Missing scripts/studio-saas.sh' }
+if (-not (Test-Path -LiteralPath $installerScript)) { throw 'Missing scripts/install-studio-saas.ps1' }
 
 $invalidOutput = @(& pwsh -NoProfile -File $localScript 'Bad Name' -DryRun 2>&1)
 if ($LASTEXITCODE -eq 0 -or ($invalidOutput -join "`n") -notmatch 'lowercase slug') {
@@ -43,8 +45,15 @@ foreach ($required in @(
 if ($localSource -notmatch '(?s)StandardOutput[.]BaseStream[.]CopyTo\(.*StandardInput[.]BaseStream\)') {
   throw 'Dokploy API key must pass directly from the root helper to gh secret set over stdin'
 }
-foreach ($required in @('template_repository.full_name', 'sshProcess.ExitCode', 'ghProcess.ExitCode', 'mktemp /tmp/studio-saas.XXXXXX')) {
+foreach ($required in @('template_repository.full_name', '$templateRevision', 'STUDIO_SAAS_VERSION', 'sshProcess.ExitCode', 'ghProcess.ExitCode', 'gh run rerun $run.databaseId --repo $repo --failed')) {
   if (-not $localSource.Contains($required)) { throw "new-saas omits required collision/transport guard: $required" }
+}
+if ($localSource.Contains('$installCommand') -or $localSource -match 'install .*studio-saas') {
+  throw 'The normal SaaS path must not install or update a root helper'
+}
+$installerSource = Get-Content -Raw -LiteralPath $installerScript
+foreach ($required in @('/etc/sudoers.d/studio-saas', 'visudo -cf', '^(validate-slug|provision|inspect|secret) [a-z0-9][a-z0-9-]*$')) {
+  if (-not $installerSource.Contains($required)) { throw "One-time studio-saas installer omits: $required" }
 }
 if ($localSource -match '(?i)Get-Clipboard|Set-Clipboard|Write-(Output|Host).*API_KEY|DOKPLOY_API_KEY\s*=') {
   throw 'new-saas must never materialize or print the Dokploy API key'
@@ -72,6 +81,8 @@ foreach ($required in @(
     '1000000000',
     'start-first',
     'rollback',
+    '.Spec.UpdateConfig.Monitor',
+    'Handlers["/"].Proxy',
     'tailscale serve --bg',
     '/environment.create',
     '/sshKey.all',
@@ -82,7 +93,7 @@ foreach ($required in @(
 if (-not $remoteSource.Contains('printf ''%s'' "$API_KEY"')) {
   throw 'studio-saas secret command must emit only the stored API key'
 }
-foreach ($required in @('APP_NAME=', 'trap ''rm -f -- "$admin_cookie" "$member_cookie" "$response"'' EXIT', 'pre-existing Dokploy application', 'no second real application')) {
+foreach ($required in @('APP_NAME=', 'STUDIO_SAAS_VERSION', 'trap ''rm -f -- "$admin_cookie" "$member_cookie" "$response"'' EXIT', 'ambiguous Dokploy application matches', 'no second real application')) {
   if (-not $remoteSource.Contains($required)) { throw "studio-saas omits required state/cleanup/isolation guard: $required" }
 }
 if ($remoteSource.Contains('not-an-application')) { throw 'Isolation tests must never use a fabricated application ID' }
@@ -99,5 +110,10 @@ if ($LASTEXITCODE -ne 0) { throw 'studio-saas shell syntax is invalid' }
 if ($LASTEXITCODE -ne 0) { throw 'studio-saas must accept the canonical slug' }
 & bash 'scripts/studio-saas.sh' validate-slug 'Bad Name' 2>$null
 if ($LASTEXITCODE -eq 0) { throw 'studio-saas must reject an unsafe slug' }
+$versionOutput = @(& bash 'scripts/studio-saas.sh' version 2>&1) -join "`n"
+$expectedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $remoteScript).Hash.ToLowerInvariant()
+if ($LASTEXITCODE -ne 0 -or $versionOutput -cne "STUDIO_SAAS_VERSION sha256=$expectedHash") {
+  throw "studio-saas version must identify the exact helper bytes: $versionOutput"
+}
 
 Write-Output 'NEW_SAAS_TESTS_OK'
