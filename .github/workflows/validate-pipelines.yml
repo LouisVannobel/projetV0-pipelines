@@ -39,10 +39,9 @@ jobs:
             '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8' \
             "$RUNNER_TEMP/$archive" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
-          # actionlint 1.7.12 does not yet parse GitHub's exact-ref $/ self-action syntax or concurrency queue.
-          self_action_ignore='^specifying action "\$/\.github/actions/deploy-dokploy" in invalid format because ref is missing\. available formats are "\{owner\}/\{repo\}@\{ref\}" or "\{owner\}/\{repo\}/\{path\}@\{ref\}"$'
+          # actionlint 1.7.12 does not yet parse GitHub's concurrency queue.
           queue_ignore='^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
-          "$RUNNER_TEMP/actionlint" -ignore "$self_action_ignore" -ignore "$queue_ignore" .github/workflows/*.yml examples/*.yml
+          "$RUNNER_TEMP/actionlint" -ignore "$queue_ignore" .github/workflows/*.yml examples/*.yml
       - name: Scan repository for secrets
         shell: bash
         run: |
