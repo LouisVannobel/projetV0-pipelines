@@ -31,6 +31,40 @@ function Invoke-GhJson([string]$Method, [string]$Path, [hashtable]$Body) {
   Assert-LastExitCode "GitHub API request failed: $Path"
 }
 
+function Send-DokploySecret([string]$TargetRepo, [string]$TargetSlug) {
+  $sshInfo = [Diagnostics.ProcessStartInfo]::new()
+  $sshInfo.FileName = (Get-Command ssh).Source
+  $sshInfo.UseShellExecute = $false
+  $sshInfo.RedirectStandardOutput = $true
+  [void]$sshInfo.ArgumentList.Add($opsHost)
+  [void]$sshInfo.ArgumentList.Add("sudo studio-saas secret $TargetSlug")
+
+  $ghInfo = [Diagnostics.ProcessStartInfo]::new()
+  $ghInfo.FileName = (Get-Command gh).Source
+  $ghInfo.UseShellExecute = $false
+  $ghInfo.RedirectStandardInput = $true
+  foreach ($argument in @('secret', 'set', 'DOKPLOY_API_KEY', '--repo', $TargetRepo, '--env', 'production')) {
+    [void]$ghInfo.ArgumentList.Add($argument)
+  }
+
+  $sshProcess = [Diagnostics.Process]::Start($sshInfo)
+  $ghProcess = [Diagnostics.Process]::Start($ghInfo)
+  try {
+    $sshProcess.StandardOutput.BaseStream.CopyTo($ghProcess.StandardInput.BaseStream)
+    $sshProcess.WaitForExit()
+    if ($sshProcess.ExitCode -ne 0) {
+      $ghProcess.Kill($true)
+      throw 'Cannot read the app-scoped Dokploy key from ops01'
+    }
+    $ghProcess.StandardInput.Close()
+    $ghProcess.WaitForExit()
+    if ($ghProcess.ExitCode -ne 0) { throw 'Cannot set the production Dokploy key in GitHub' }
+  } finally {
+    $sshProcess.Dispose()
+    $ghProcess.Dispose()
+  }
+}
+
 foreach ($command in @('gh', 'ssh')) {
   if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "$command is required" }
 }
@@ -75,9 +109,6 @@ $applicationId = $Matches.application
 $healthUrl = $Matches.health
 
 Invoke-GhJson PUT "repos/$repo/environments/production" @{
-  wait_timer = 0
-  prevent_self_review = $false
-  reviewers = @()
   deployment_branch_policy = @{ protected_branches = $true; custom_branch_policies = $false }
 }
 Invoke-GhJson PUT "repos/$repo/actions/permissions" @{
@@ -120,27 +151,25 @@ Assert-LastExitCode 'Cannot set HEALTH_URL'
 & gh variable set DOKPLOY_APPLICATION_ID --repo $repo --env production --body $applicationId
 Assert-LastExitCode 'Cannot set production DOKPLOY_APPLICATION_ID'
 
-& ssh $opsHost "sudo studio-saas secret $Slug" |
-  & gh secret set DOKPLOY_API_KEY --repo $repo --env production --body -
-$secretTransferSucceeded = $?
-if (-not $secretTransferSucceeded) {
-  throw 'Cannot transfer the app-scoped Dokploy key to the production environment'
-}
+Send-DokploySecret -TargetRepo $repo -TargetSlug $Slug
 
 $headSha = (& gh api "repos/$repo/commits/main" --jq .sha).Trim()
 Assert-LastExitCode 'Cannot resolve the initial main revision'
-& gh workflow run release.yml --repo $repo --ref main
-Assert-LastExitCode 'Cannot dispatch the initial release'
 
 $run = $null
 for ($attempt = 1; $attempt -le 20; $attempt++) {
-  $runs = & gh run list --repo $repo --workflow release.yml --event workflow_dispatch --limit 10 --json databaseId,headSha,status,url | ConvertFrom-Json
+  $runs = & gh run list --repo $repo --workflow release.yml --event push --limit 10 --json databaseId,headSha,status,conclusion,url | ConvertFrom-Json
   Assert-LastExitCode 'Cannot list the initial release run'
   $run = $runs | Where-Object { $_.headSha -eq $headSha } | Select-Object -First 1
   if ($run) { break }
   Start-Sleep -Seconds 2
 }
-if (-not $run) { throw 'The initial release run was not created' }
+if (-not $run) { throw 'The template creation push produced no release run' }
+if ($run.status -eq 'completed' -and $run.conclusion -ne 'success') {
+  & gh run rerun $run.databaseId --repo $repo
+  Assert-LastExitCode 'Cannot rerun the configured template creation release'
+  Start-Sleep -Seconds 2
+}
 & gh run watch $run.databaseId --repo $repo --exit-status
 Assert-LastExitCode "Initial release failed: $($run.url)"
 

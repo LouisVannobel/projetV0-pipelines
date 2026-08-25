@@ -33,13 +33,19 @@ api_cookie() {
 
 api_key_status() {
   local method="$1" path="$2" body="$3" output="$4" key="$5"
-  local -a args=(--silent --show-error --connect-timeout 5 --max-time 30 --config <(printf 'header = "x-api-key: %s"\n' "$key") -o "$output" -w '%{http_code}' -X "$method")
+  local header_file status
+  header_file="$(mktemp)"
+  chmod 0600 "$header_file"
+  printf 'x-api-key: %s\n' "$key" >"$header_file"
+  local -a args=(--silent --show-error --connect-timeout 5 --max-time 30 -H "@$header_file" -o "$output" -w '%{http_code}' -X "$method")
   if [[ -n "$body" ]]; then
     args+=(-H 'content-type: application/json' --data-binary @-)
-    curl "${args[@]}" "$API_BASE$path" <<<"$body" || printf 000
+    status="$(curl "${args[@]}" "$API_BASE$path" <<<"$body")" || status=000
   else
-    curl "${args[@]}" "$API_BASE$path" || printf 000
+    status="$(curl "${args[@]}" "$API_BASE$path")" || status=000
   fi
+  rm -f -- "$header_file"
+  printf '%s\n' "$status"
 }
 
 save_state() {
@@ -278,7 +284,7 @@ case "$command_name" in
     STATE_FILE="$STATE_DIR/$SLUG.env"
     load_state
     [[ -n "$API_KEY" ]] || die 'deployment API key is unavailable'
-    printf '%s\n' "$API_KEY"
+    printf '%s' "$API_KEY"
     ;;
   *) die 'usage: studio-saas {validate-slug|provision|inspect|secret} <slug>' ;;
 esac

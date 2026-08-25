@@ -34,20 +34,23 @@ foreach ($required in @(
     'automated-security-fixes',
     'DOKPLOY_APPLICATION_ID',
     'DOKPLOY_API_KEY',
-    'gh secret set',
-    '--body -',
-    'workflow run release.yml'
+    '''secret'', ''set'', ''DOKPLOY_API_KEY''',
+    'gh run rerun',
+    '--event push'
   )) {
   if (-not $localSource.Contains($required)) { throw "new-saas omits required golden-path control: $required" }
 }
-if ($localSource -notmatch '(?s)& ssh .*studio-saas secret.*\|\s*& gh secret set DOKPLOY_API_KEY.*--body -') {
+if ($localSource -notmatch '(?s)StandardOutput[.]BaseStream[.]CopyTo\(.*StandardInput[.]BaseStream\)') {
   throw 'Dokploy API key must pass directly from the root helper to gh secret set over stdin'
 }
-foreach ($required in @('template_repository.full_name', '$secretTransferSucceeded = $?', 'mktemp /tmp/studio-saas.XXXXXX')) {
+foreach ($required in @('template_repository.full_name', 'sshProcess.ExitCode', 'ghProcess.ExitCode', 'mktemp /tmp/studio-saas.XXXXXX')) {
   if (-not $localSource.Contains($required)) { throw "new-saas omits required collision/transport guard: $required" }
 }
 if ($localSource -match '(?i)Get-Clipboard|Set-Clipboard|Write-(Output|Host).*API_KEY|DOKPLOY_API_KEY\s*=') {
   throw 'new-saas must never materialize or print the Dokploy API key'
+}
+if ($localSource -match '''--body'',\s*''-''') {
+  throw 'gh secret set must read stdin by omitting --body, not store a literal hyphen'
 }
 
 $remoteSource = Get-Content -Raw -LiteralPath $remoteScript
@@ -76,7 +79,7 @@ foreach ($required in @(
   )) {
   if (-not $remoteSource.Contains($required)) { throw "studio-saas omits required invariant: $required" }
 }
-if (-not $remoteSource.Contains('printf ''%s\n'' "$API_KEY"')) {
+if (-not $remoteSource.Contains('printf ''%s'' "$API_KEY"')) {
   throw 'studio-saas secret command must emit only the stored API key'
 }
 foreach ($required in @('APP_NAME=', 'trap ''rm -f -- "$admin_cookie" "$member_cookie" "$response"'' EXIT', 'pre-existing Dokploy application', 'no second real application')) {
