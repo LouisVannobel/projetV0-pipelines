@@ -10,4 +10,4 @@ jobs:
       contents: read
       packages: write
       id-token: write
-    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-container-release.yml@8339f7f8349d4e9824ffe95a3941cd9b691c6135 # v1.1.1
+    uses: LouisVannobel/projetV0-pipelines/.github/workflows/reusable-container-release.yml@aab6ec7c6201881691e38bcfb13de99514bd6fb7 # v1.1.2

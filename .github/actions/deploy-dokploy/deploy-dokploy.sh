@@ -83,6 +83,7 @@ health_retry_seconds="${DOKPLOY_HEALTH_RETRY_SECONDS:-5}"
 dokploy_url="${DOKPLOY_URL%/}"
 release_digest="${RELEASE_REF##*@}"
 deployment_title="github:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}:${release_digest}"
+recovery_deployment_title="github-recovery:${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}:${release_digest}"
 api_request() {
   local method="$1"
   local endpoint="$2"
@@ -119,12 +120,14 @@ api_request() {
 
 parse_application_contract() {
   local application="$1"
+  local expected_repository="ghcr.io/${GITHUB_REPOSITORY,,}"
   local prior_image
   if ! prior_image="$(python3 -c '
 import json
 import re
 import sys
 
+expected_repository = sys.argv[1]
 value = json.load(sys.stdin)
 if not isinstance(value, dict) or value.get("sourceType") != "docker":
     raise ValueError("application is not Docker-backed")
@@ -136,8 +139,14 @@ pattern = re.compile(
 )
 if not isinstance(image, str) or not pattern.fullmatch(image):
     raise ValueError("application Docker image is missing or unsafe")
+if "@sha256:" in image:
+    repository = image.rsplit("@sha256:", 1)[0]
+else:
+    repository = image.rsplit(":", 1)[0] if ":" in image.rsplit("/", 1)[-1] else image
+if repository != expected_repository:
+    raise ValueError("application Docker image belongs to another repository")
 print(image)
-' <<< "$application" 2>/dev/null)"; then
+' "$expected_repository" <<< "$application" 2>/dev/null)"; then
     fail 'Dokploy application must use Docker source with a safe existing image'
   fi
   printf '%s' "$prior_image"
@@ -161,6 +170,7 @@ recovery_running=false
 restore_update_body=''
 recover_desired_image() {
   local original_status=$?
+  local recovery_deploy_body
   trap - EXIT
   if [[ "$original_status" -eq 0 || "$recovery_armed" != true || "$recovery_running" == true ]]; then
     exit "$original_status"
@@ -170,6 +180,11 @@ recover_desired_image() {
   recovery_armed=false
   if ! api_request POST '/application.update' "$restore_update_body" >/dev/null; then
     printf 'Desired-image recovery failed\n' >&2
+  else
+    recovery_deploy_body="{\"applicationId\":\"${DOKPLOY_APPLICATION_ID}\",\"title\":\"${recovery_deployment_title}\"}"
+    if ! api_request POST '/application.deploy' "$recovery_deploy_body" >/dev/null; then
+      printf 'Desired-image recovery failed\n' >&2
+    fi
   fi
   exit "$original_status"
 }
