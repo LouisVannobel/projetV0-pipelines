@@ -225,23 +225,20 @@ if ($saasExample -match '(?ms)^\s+with:\s*$') {
 }
 
 $saasCi = Get-Content -Raw -LiteralPath '.github\workflows\reusable-saas-ci.yml'
-if ($saasCi -notmatch '(?ms)^      run-lighthouse:\s*$.*?^        default:\s*false\s*$') {
-  throw 'Lighthouse must be opt-in because a one-run score is noisy and axe already gates accessibility'
-}
 $gateMatch = [regex]::Match($saasCi, '(?ms)^  gate:\s*$.*?(?=^  \w[^\r\n]*:\s*$|\z)')
 if (-not $gateMatch.Success) { throw 'Reusable SaaS CI must expose a gate job' }
 $gate = $gateMatch.Value
 if ($gate -notmatch '(?m)^    name:\s*CI / gate\s*$') { throw 'SaaS gate must be named CI / gate' }
 if ($gate -notmatch '(?m)^    if:\s*\$\{\{\s*always\(\)\s*\}\}\s*$') { throw 'SaaS gate must run unconditionally under always()' }
-foreach ($requiredJob in @('secrets-and-source', 'quality', 'accessibility', 'lighthouse', 'container')) {
+foreach ($requiredJob in @('secrets-and-source', 'quality', 'accessibility', 'container')) {
   if ($gate -notmatch [regex]::Escape($requiredJob)) { throw "SaaS gate must consume job: $requiredJob" }
 }
-foreach ($resultVariable in @('SECRETS_AND_SOURCE_RESULT', 'QUALITY_RESULT', 'ACCESSIBILITY_RESULT', 'LIGHTHOUSE_RESULT', 'CONTAINER_RESULT')) {
+foreach ($resultVariable in @('SECRETS_AND_SOURCE_RESULT', 'QUALITY_RESULT', 'ACCESSIBILITY_RESULT', 'CONTAINER_RESULT')) {
   if ($gate -notmatch [regex]::Escape($resultVariable)) { throw "SaaS gate step must validate $resultVariable" }
 }
 if ($gate -notmatch '(?ms)case "\$SECRETS_AND_SOURCE_RESULT" in.*?success\) ;;.*?\*\).*?exit 1.*?esac') { throw 'SaaS gate must reject non-success required results' }
 if ($gate -notmatch '(?ms)case "\$QUALITY_RESULT" in.*?success\) ;;.*?\*\).*?exit 1.*?esac') { throw 'SaaS gate must reject non-success required results' }
-if ($gate -notmatch '(?ms)for result in "\$ACCESSIBILITY_RESULT" "\$LIGHTHOUSE_RESULT" "\$CONTAINER_RESULT"; do.*?case "\$result" in.*?success\|skipped\) ;;.*?\*\).*?exit 1.*?esac.*?done') { throw 'SaaS gate must reject non-success/non-skipped optional results' }
+if ($gate -notmatch '(?ms)for result in "\$ACCESSIBILITY_RESULT" "\$CONTAINER_RESULT"; do.*?case "\$result" in.*?success\|skipped\) ;;.*?\*\).*?exit 1.*?esac.*?done') { throw 'SaaS gate must reject non-success/non-skipped optional results' }
 if ($gate -match '(?i)permissions:.*(write|read-all)') { throw 'SaaS gate must not request write permissions' }
 
 $containerRelease = Get-Content -Raw -LiteralPath '.github\workflows\reusable-container-release.yml'

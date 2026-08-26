@@ -19,10 +19,6 @@ on:
         description: Run the Playwright test:a11y script
         type: boolean
         default: true
-      run-lighthouse:
-        description: Run the repository lighthouse script
-        type: boolean
-        default: false
       run-container:
         description: Build and vulnerability-scan the production Dockerfile
         type: boolean
@@ -145,37 +141,6 @@ jobs:
       - name: Run axe-core through Playwright
         run: pnpm run test:a11y
 
-  lighthouse:
-    name: Lighthouse budgets
-    if: inputs.run-lighthouse
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: ${{ inputs.working-directory }}
-    steps:
-      - name: Checkout without persisted credentials
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Install pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          version: ${{ inputs.pnpm-version }}
-          run_install: false
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ inputs.node-version }}
-          cache: pnpm
-          cache-dependency-path: ${{ inputs.working-directory }}/pnpm-lock.yaml
-      - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Build application
-        run: pnpm run build
-      - name: Run Lighthouse CI
-        run: pnpm run lighthouse
-
   container:
     name: Build and scan production image
     if: inputs.run-container
@@ -216,7 +181,7 @@ jobs:
   gate:
     name: CI / gate
     if: ${{ always() }}
-    needs: [secrets-and-source, quality, accessibility, lighthouse, container]
+    needs: [secrets-and-source, quality, accessibility, container]
     runs-on: ubuntu-24.04
     steps:
       - name: Enforce CI dependency results
@@ -224,7 +189,6 @@ jobs:
           SECRETS_AND_SOURCE_RESULT: ${{ needs.secrets-and-source.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
           ACCESSIBILITY_RESULT: ${{ needs.accessibility.result }}
-          LIGHTHOUSE_RESULT: ${{ needs.lighthouse.result }}
           CONTAINER_RESULT: ${{ needs.container.result }}
         shell: bash
         run: |
@@ -237,7 +201,7 @@ jobs:
             success) ;;
             *) echo "quality result was $QUALITY_RESULT"; exit 1 ;;
           esac
-          for result in "$ACCESSIBILITY_RESULT" "$LIGHTHOUSE_RESULT" "$CONTAINER_RESULT"; do
+          for result in "$ACCESSIBILITY_RESULT" "$CONTAINER_RESULT"; do
             case "$result" in
               success|skipped) ;;
               *) echo "optional CI result was $result"; exit 1 ;;
