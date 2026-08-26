@@ -12,19 +12,11 @@ Cette commande crée le dépôt privé depuis le template, une application Dokpl
 
 L'installation ou la mise à jour root du helper est une opération de plateforme séparée : `pwsh -File scripts/install-studio-saas.ps1`. Elle ne fait pas partie de la création normale d'un SaaS.
 
-## Appel depuis un SaaS
-
-Copier `examples/saas-ci.yml` vers `.github/workflows/ci.yml` et `examples/container-release.yml` vers `.github/workflows/release.yml`. Les deux workflows sont épinglés au même commit immuable :
-
-`3f385a4857ff7a85fcaa414296321154783272da` (`v1.4.0`)
-
-Le SaaS fournit `package.json`, `pnpm-lock.yaml`, un Dockerfile multi-stage et les scripts pnpm `lint`, `typecheck`, `test`, `build` et `test:a11y`. Lighthouse reste opt-in. La CI publie le statut requis `CI / gate`.
-
 ## Release
 
 Le push sur `main` construit une seule image GHCR sans tag, puis scanne son digest immuable dans le workflow partagé. Un job `deploy` local au caller reçoit ensuite ce digest et le déploie via le tailnet Dokploy ; lui seul obtient `id-token: write` et l'environnement `production`.
 
-Configurer les variables du dépôt `DOKPLOY_APPLICATION_ID`, `DOKPLOY_URL`, `HEALTH_URL`, `TS_WIF_CLIENT_ID` et `TS_WIF_AUDIENCE`, ainsi que `DOKPLOY_API_KEY` comme secret de l'environnement `production`. Le secret reste dans le job local `deploy` et n'est jamais transmis au workflow réutilisable.
+Configurer `DOKPLOY_URL`, `HEALTH_URL`, `TS_WIF_CLIENT_ID` et `TS_WIF_AUDIENCE` comme variables du dépôt, `DOKPLOY_APPLICATION_ID` comme variable de l'environnement GitHub `production`, et `DOKPLOY_API_KEY` comme secret de ce même environnement. Le secret reste dans le job local `deploy` et n'est jamais transmis au workflow réutilisable.
 
 L'application Dokploy doit utiliser la source Docker (`sourceType: docker`) et déjà pointer vers le même repository GHCR que le caller. Les identifiants de pull privés sont configurés dans Dokploy. Utiliser une identité CI non personnelle, révocable et limitée au projet, à l'environnement et aux services SaaS. L'environnement GitHub `production` n'accepte que les branches protégées.
 
