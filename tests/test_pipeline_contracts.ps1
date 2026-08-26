@@ -244,12 +244,20 @@ function Assert-SaasQualityFallowContract {
   if ($fallow -notmatch '(?m)^\s+run:\s+pnpm exec fallow audit --no-css --base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"\s*$') { throw 'Fallow audit must use the exact immutable PR base and disable CSS analysis' }
   if ($fallow -match '(?m)^\s+continue-on-error:|\|\|\s*true') { throw 'Fallow audit must fail closed' }
 
+  $doctorMatches = @([regex]::Matches($quality, '(?ms)^\s+-\s+name:\s+React Doctor advisory\s*$.*?(?=^\s+-\s+name:|\z)'))
+  if ($doctorMatches.Count -ne 1) { throw 'SaaS quality must run exactly one React Doctor advisory step' }
+  $doctor = $doctorMatches[0].Value
+  if ($doctor -notmatch "(?m)^\s+if:\s+github\.event_name == 'pull_request'\s*$") { throw 'React Doctor must run only for pull requests' }
+  if ($doctor -notmatch '(?m)^\s+run:\s+pnpm run doctor --scope changed --base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"\s*$') { throw 'React Doctor must request changed scope with the immutable PR base' }
+  if ($doctor -match '(?m)^\s+continue-on-error:|\|\|\s*true') { throw 'React Doctor CLI exit failures must propagate' }
+
   $installIndex = $quality.IndexOf('- name: Install locked dependencies')
   $lintIndex = $quality.IndexOf('- name: Lint')
   $fallowIndex = $quality.IndexOf('- name: Audit PR changes with Fallow')
+  $doctorIndex = $quality.IndexOf('- name: React Doctor advisory')
   $typecheckIndex = $quality.IndexOf('- name: Typecheck')
-  if ($installIndex -lt 0 -or $lintIndex -le $installIndex -or $fallowIndex -le $lintIndex -or $typecheckIndex -le $fallowIndex) {
-    throw 'SaaS quality must install, lint, audit PR changes, then typecheck'
+  if ($installIndex -lt 0 -or $lintIndex -le $installIndex -or $fallowIndex -le $lintIndex -or $doctorIndex -le $fallowIndex -or $typecheckIndex -le $doctorIndex) {
+    throw 'SaaS quality must install, lint, run Fallow, run React Doctor, then typecheck'
   }
 }
 

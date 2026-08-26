@@ -107,6 +107,9 @@ jobs:
       - name: Audit PR changes with Fallow
         if: github.event_name == 'pull_request'
         run: pnpm exec fallow audit --no-css --base "${{ github.event.pull_request.base.sha }}"
+      - name: React Doctor advisory
+        if: github.event_name == 'pull_request'
+        run: pnpm run doctor --scope changed --base "${{ github.event.pull_request.base.sha }}"
       - name: Typecheck
         run: pnpm run typecheck
       - name: Unit and integration tests
