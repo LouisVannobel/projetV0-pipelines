@@ -12,7 +12,7 @@ const harnessNames = [
 ];
 const harnessSources = Object.fromEntries(harnessNames.map((name) => [
   name,
-  fs.readFileSync(path.join(here, name), 'utf8')
+  fs.readFileSync(path.join(here, name), 'utf8').replace(/\r\n/g, '\n')
 ]));
 
 const fixedBashSelection = [

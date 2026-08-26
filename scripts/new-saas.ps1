@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $owner = 'LouisVannobel'
 $template = 'LouisVannobel/projetV0-saas-template'
-$templateRevision = '321f007caadca4b604e7c365d201d6dd8219dd7a'
+$templateRevision = '9f36856797ebc6a3e7de203028c8b894b2e006b4'
 $pipelineRevision = '9df204d23475ca7a00922307e7df825531211db2'
 $opsHost = 'ops01'
 $repo = "$owner/$Slug"

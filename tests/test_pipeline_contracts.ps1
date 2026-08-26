@@ -357,6 +357,97 @@ if ($containerBuildCallerJob -match 'id-token:\s*write|environment:\s*production
 }
 
 $containerDeployCallerJob = [regex]::Match($containerReleaseExample, '(?ms)^  deploy:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
+function Assert-TailscalePayloadPin([string]$DeployJob) {
+  $actualDeployJobShape = @(
+    [regex]::Matches($DeployJob, '(?m)^ {4}\S[^\r\n]*\r?$') |
+      ForEach-Object { $_.Value.Trim() }
+  )
+  $expectedDeployJobShape = @(
+    'needs: build',
+    'permissions:',
+    'environment: production',
+    'runs-on: ubuntu-24.04',
+    'timeout-minutes: 20',
+    'steps:'
+  )
+  if (($actualDeployJobShape -join "`n") -cne ($expectedDeployJobShape -join "`n")) {
+    throw 'The local deploy job must retain only the canonical fail-closed controls'
+  }
+  $deploySteps = @([regex]::Matches($DeployJob, '(?ms)^ {6}-(?:[ \t]+[^\r\n]*)?(?:\r?\n|\z).*?(?=^ {6}-(?:[ \t]|\r?$)|\z)'))
+  if ($deploySteps.Count -ne 2) { throw 'The local deploy job must contain exactly the canonical Tailscale and Dokploy steps' }
+  $tailscaleStep = $deploySteps[0]
+  $dokployStep = $deploySteps[1]
+  if ($tailscaleStep.Value -notmatch '(?m)^ {6}- name: Join private deployment tailnet[ \t]*\r?$') {
+    throw 'The first production step must be the canonical Tailscale connection'
+  }
+  if ($dokployStep.Value -notmatch '(?m)^ {6}- name: Deploy verified digest through Dokploy[ \t]*\r?$') {
+    throw 'The canonical Dokploy deploy must immediately follow Tailscale'
+  }
+  foreach ($step in @($tailscaleStep, $dokployStep)) {
+    if ($step.Value -match '(?im)^ {8}(?:if|continue-on-error|background)[ \t]*:') {
+      throw 'Production connection and deploy steps must be synchronous, unconditional, and fail closed'
+    }
+  }
+  if (@([regex]::Matches($tailscaleStep.Value, '(?m)^ {8}\S[^\r\n]*\r?$')).Count -ne 2 -or
+      @([regex]::Matches($dokployStep.Value, '(?m)^ {8}\S[^\r\n]*\r?$')).Count -ne 2 -or
+      $dokployStep.Value -notmatch '(?m)^ {8}env:[ \t]*\r?$') {
+    throw 'Production steps must contain only their canonical uses/with or uses/env mappings'
+  }
+  if (@([regex]::Matches($DeployJob, '(?m)^ {8}uses: tailscale/github-action@')).Count -ne 1) {
+    throw 'The local deploy job must invoke Tailscale exactly once'
+  }
+  if (@([regex]::Matches($DeployJob, '(?m)^ {8}uses: LouisVannobel/projetV0-pipelines/[.]github/actions/deploy-dokploy@')).Count -ne 1 -or
+      $dokployStep.Value -notmatch '(?m)^ {8}uses: LouisVannobel/projetV0-pipelines/[.]github/actions/deploy-dokploy@3f385a4857ff7a85fcaa414296321154783272da # v1[.]4[.]0\r?$') {
+    throw 'The second production step must retain the immutable reviewed Dokploy action pin'
+  }
+  if ($tailscaleStep.Value -notmatch '(?m)^ {8}uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4[.]1[.]3\r?$') {
+    throw 'The Tailscale step must retain its immutable reviewed action pin'
+  }
+  $tailscaleWith = [regex]::Match($tailscaleStep.Value, '(?ms)^ {8}with:[ \t]*\r?\n(?<body>(?:^ {10}[^\r\n]*(?:\r?\n|\z))+)')
+  if (-not $tailscaleWith.Success) { throw 'The Tailscale step must contain its canonical with mapping' }
+  $expectedTailscaleInputs = [ordered]@{
+    version = "'1.94.2'"
+    sha256sum = "'c6f99a5d774c7783b56902188d69e9756fc3dddfb08ac6be4cb2585f3fecdc32'"
+    'use-cache' = "'false'"
+  }
+  foreach ($entry in $expectedTailscaleInputs.GetEnumerator()) {
+    $pattern = '(?m)^ {{10}}{0}:[ \t]*(?<value>[^\r\n#]*)\r?$' -f [regex]::Escape([string]$entry.Key)
+    $matches = @([regex]::Matches($tailscaleWith.Groups['body'].Value, $pattern))
+    if ($matches.Count -ne 1 -or $matches[0].Groups['value'].Value.Trim() -cne [string]$entry.Value) {
+      throw "Tailscale input '$($entry.Key)' must occur once with exact literal $($entry.Value)"
+    }
+  }
+}
+Assert-TailscalePayloadPin $containerDeployCallerJob
+$canonicalDeploySteps = @([regex]::Matches($containerDeployCallerJob, '(?ms)^ {6}- .*?(?=^ {6}- |\z)'))
+$swapToken = '__TAILSCALE_STEP_SWAP__'
+$swappedDeploySteps = $containerDeployCallerJob.Replace($canonicalDeploySteps[0].Value, $swapToken).Replace($canonicalDeploySteps[1].Value, $canonicalDeploySteps[0].Value).Replace($swapToken, $canonicalDeploySteps[1].Value)
+$secondTailscaleStep = @'
+      - name: Reinstall Tailscale
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          version: latest
+'@
+$tailscaleMutations = @(
+  $containerDeployCallerJob.Replace("version: '1.94.2'", 'version: latest'),
+  $containerDeployCallerJob.Replace("sha256sum: 'c6f99a5d774c7783b56902188d69e9756fc3dddfb08ac6be4cb2585f3fecdc32'", 'sha256sum: ${{ vars.TS_SHA256SUM }}'),
+  $containerDeployCallerJob.Replace("use-cache: 'false'", "use-cache: 'true'"),
+  $containerDeployCallerJob.Replace('      - name: Join private deployment tailnet', "      - name: Join private deployment tailnet`n        if: false"),
+  $containerDeployCallerJob.Replace('      - name: Join private deployment tailnet', "      - name: Join private deployment tailnet`n        continue-on-error: true"),
+  $containerDeployCallerJob.Replace('      - name: Join private deployment tailnet', "      - name: Join private deployment tailnet`n        background: true"),
+  $containerDeployCallerJob.Replace('      - name: Join private deployment tailnet', "      - name: Join private deployment tailnet`n        if : false"),
+  $containerDeployCallerJob.Replace('  deploy:', "  deploy:`n    if: false"),
+  $containerDeployCallerJob.Replace('  deploy:', "  deploy:`n    continue-on-error: true"),
+  $containerDeployCallerJob.Replace('    steps:', "    steps:`n      -`n        name: Unsafe pre-Tailscale step`n        run: echo unsafe"),
+  $containerDeployCallerJob.Replace('      - name: Deploy verified digest through Dokploy', "$secondTailscaleStep`n      - name: Deploy verified digest through Dokploy"),
+  $swappedDeploySteps
+)
+foreach ($mutation in $tailscaleMutations) {
+  if ($mutation -ceq $containerDeployCallerJob) { throw 'Tailscale mutation fixture did not alter the canonical step' }
+  $rejected = $false
+  try { Assert-TailscalePayloadPin $mutation } catch { $rejected = $true }
+  if (-not $rejected) { throw 'An unsafe Tailscale payload mutation remained accepted' }
+}
 foreach ($requiredLocalDeployControl in @(
   'needs: build',
   'contents: read',
