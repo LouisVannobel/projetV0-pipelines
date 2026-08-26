@@ -8,7 +8,8 @@ import { parse } from 'yaml';
 import { validateWorkflow } from './validate-release-workflow.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const validSource = fs.readFileSync(path.join(here, 'fixtures', 'valid-release-workflow.yml'), 'utf8');
+const validSource = fs.readFileSync(path.join(here, 'fixtures', 'valid-release-workflow.yml'), 'utf8')
+  .replace(/\r\n/g, '\n');
 const validatorPath = path.join(here, 'validate-release-workflow.mjs');
 
 function violations(source = validSource) {
