@@ -8,7 +8,7 @@ $installerScript = Join-Path $root 'scripts\install-studio-saas.ps1'
 if (-not (Test-Path -LiteralPath $localScript)) { throw 'Missing scripts/new-saas.ps1' }
 if (-not (Test-Path -LiteralPath $remoteScript)) { throw 'Missing scripts/studio-saas.sh' }
 if (-not (Test-Path -LiteralPath $installerScript)) { throw 'Missing scripts/install-studio-saas.ps1' }
-$reviewedHelperHash = 'd55edde4cf838dc38cb92b86e88a65d38c07ee409cca071ac877874ebded7543'
+$reviewedHelperHash = '42ca1bab528d74982b746a488536d40409ebecb206bc6bce393bca3ce5978686'
 $actualHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $remoteScript).Hash.ToLowerInvariant()
 if ($actualHelperHash -cne $reviewedHelperHash) { throw "Repository studio-saas.sh is not the reviewed artifact: $actualHelperHash" }
 
@@ -87,7 +87,7 @@ foreach ($required in @(
     '/etc/sudoers.d/studio-saas',
     'visudo -cf',
     '^(validate-slug|provision|inspect|secret) [a-z0-9][a-z0-9-]*$',
-    "`$expectedHash = 'd55edde4cf838dc38cb92b86e88a65d38c07ee409cca071ac877874ebded7543'",
+    "`$expectedHash = '42ca1bab528d74982b746a488536d40409ebecb206bc6bce393bca3ce5978686'",
     'mktemp -d /tmp/studio-saas.',
     'mktemp /usr/local/sbin/.studio-saas.',
     'mktemp /etc/sudoers.d/.studio-saas.',

@@ -21,7 +21,7 @@ foreach ($command in @('bash', 'scp', 'ssh')) {
 
 $helper = Join-Path $PSScriptRoot 'studio-saas.sh'
 if (-not (Test-Path -LiteralPath $helper)) { throw 'studio-saas.sh is missing' }
-$expectedHash = 'd55edde4cf838dc38cb92b86e88a65d38c07ee409cca071ac877874ebded7543'
+$expectedHash = '42ca1bab528d74982b746a488536d40409ebecb206bc6bce393bca3ce5978686'
 $localHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $helper).Hash.ToLowerInvariant()
 if ($localHash -cne $expectedHash) { throw "Local studio-saas.sh is not the reviewed artifact: $localHash" }
 & bash -n (Convert-ToBashPath $helper)
