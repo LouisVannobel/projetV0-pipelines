@@ -224,7 +224,49 @@ if ($saasExample -match '(?ms)^\s+with:\s*$') {
   throw 'The SaaS example must rely on reusable workflow defaults and omit inputs'
 }
 
+function Assert-SaasQualityFallowContract {
+  param([Parameter(Mandatory)][string]$Workflow)
+
+  $qualityMatch = [regex]::Match($Workflow, '(?ms)^  quality:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)')
+  if (-not $qualityMatch.Success) { throw 'Reusable SaaS CI must expose a quality job' }
+  $quality = $qualityMatch.Value
+
+  $checkoutMatches = @([regex]::Matches($quality, '(?ms)^\s+-\s+name:\s+Checkout without persisted credentials\s*$.*?(?=^\s+-\s+name:|\z)'))
+  if ($checkoutMatches.Count -ne 1) { throw 'SaaS quality must checkout exactly once' }
+  $checkout = $checkoutMatches[0].Value
+  if ($checkout -notmatch '(?m)^\s+persist-credentials:\s*false\s*$') { throw 'SaaS quality checkout must not persist credentials' }
+  if ($checkout -notmatch '(?m)^\s+fetch-depth:\s*0\s*$') { throw 'SaaS quality checkout must fetch history for the PR audit base' }
+
+  $fallowMatches = @([regex]::Matches($quality, '(?ms)^\s+-\s+name:\s+Audit PR changes with Fallow\s*$.*?(?=^\s+-\s+name:|\z)'))
+  if ($fallowMatches.Count -ne 1) { throw 'SaaS quality must run exactly one Fallow audit step' }
+  $fallow = $fallowMatches[0].Value
+  if ($fallow -notmatch "(?m)^\s+if:\s+github\.event_name == 'pull_request'\s*$") { throw 'Fallow audit must run only for pull requests' }
+  if ($fallow -notmatch '(?m)^\s+run:\s+pnpm exec fallow audit --no-css --base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"\s*$') { throw 'Fallow audit must use the exact immutable PR base and disable CSS analysis' }
+  if ($fallow -match '(?m)^\s+continue-on-error:|\|\|\s*true') { throw 'Fallow audit must fail closed' }
+
+  $installIndex = $quality.IndexOf('- name: Install locked dependencies')
+  $lintIndex = $quality.IndexOf('- name: Lint')
+  $fallowIndex = $quality.IndexOf('- name: Audit PR changes with Fallow')
+  $typecheckIndex = $quality.IndexOf('- name: Typecheck')
+  if ($installIndex -lt 0 -or $lintIndex -le $installIndex -or $fallowIndex -le $lintIndex -or $typecheckIndex -le $fallowIndex) {
+    throw 'SaaS quality must install, lint, audit PR changes, then typecheck'
+  }
+}
+
 $saasCi = Get-Content -Raw -LiteralPath '.github\workflows\reusable-saas-ci.yml'
+Assert-SaasQualityFallowContract -Workflow $saasCi
+
+$fallowContractMutations = @{
+  'shallow checkout' = $saasCi.Replace('fetch-depth: 0', 'fetch-depth: 1')
+  'non-PR execution' = $saasCi.Replace("if: github.event_name == 'pull_request'", 'if: true')
+  'wrong audit base' = $saasCi.Replace('github.event.pull_request.base.sha', 'github.sha')
+  'soft failure' = $saasCi.Replace('pnpm exec fallow audit --no-css --base "${{ github.event.pull_request.base.sha }}"', 'pnpm exec fallow audit --no-css --base "${{ github.event.pull_request.base.sha }}" || true')
+}
+foreach ($mutation in $fallowContractMutations.GetEnumerator()) {
+  $rejected = $false
+  try { Assert-SaasQualityFallowContract -Workflow $mutation.Value } catch { $rejected = $true }
+  if (-not $rejected) { throw "SaaS quality contract accepted mutation: $($mutation.Key)" }
+}
 $gateMatch = [regex]::Match($saasCi, '(?ms)^  gate:\s*$.*?(?=^  \w[^\r\n]*:\s*$|\z)')
 if (-not $gateMatch.Success) { throw 'Reusable SaaS CI must expose a gate job' }
 $gate = $gateMatch.Value
@@ -522,7 +564,7 @@ $actionlintExe = $env:ACTIONLINT_EXE
 if ($actionlintExe) {
   if (-not (Test-Path -LiteralPath $actionlintExe)) { throw "actionlint executable not found: $actionlintExe" }
   $exampleWorkflows = @(Get-ChildItem -LiteralPath 'examples' -Filter '*.yml' -File | ForEach-Object FullName)
-  & $actionlintExe -ignore $actionlintSelfActionIgnore -ignore $actionlintQueueIgnore @($workflows + '.github\workflows\validate-pipelines.yml' + $exampleWorkflows)
+  & $actionlintExe -ignore $actionlintQueueIgnore @($workflows + '.github\workflows\validate-pipelines.yml' + $exampleWorkflows)
   if ($LASTEXITCODE -ne 0) { throw "actionlint failed with exit code $LASTEXITCODE" }
 }
 
