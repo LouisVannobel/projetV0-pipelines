@@ -58,6 +58,50 @@ if [[ "$range_status" -ne 0 || ! -f "$RANGE_SAVE_MARKER" || "$(<"$RANGE_SAVE_MAR
   preflight_failures+=('Docker published-port ranges were not allocated around exactly')
 fi
 
+RUNTIME_OUTPUT="$TEST_DIR/runtime-inventory.out"
+set +e
+(
+  require_root() { :; }
+  load_state() { :; }
+  SLUG='invoice-ai'
+  APPLICATION_ID='app-own'
+  APP_NAME='invoice-ai-service'
+  PUBLISHED_PORT='3500'
+  HEALTH_PORT='8500'
+  FAKE_REVISION='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  FAKE_IMAGE="ghcr.io/louisvannobel/invoice-ai@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  docker() {
+    case "$1 $2" in
+      'service inspect')
+        if [[ "$*" == *'json .Endpoint.Spec.Ports'* ]]; then
+          builtin printf '[{"Protocol":"tcp","TargetPort":3000,"PublishedPort":3500,"PublishMode":"ingress"}]'
+        else
+          builtin printf '%s|536870912|1000000000|true|1|rollback|start-first|1|5s|30s|0|pause|stop-first|1|5s|30s|0\n' "$FAKE_IMAGE"
+        fi
+        ;;
+      'ps --filter') builtin printf 'container-1\n'; return 70 ;;
+      'inspect container-1') builtin printf 'healthy\n' ;;
+      'image inspect') builtin printf '%s|https://github.com/LouisVannobel/invoice-ai\n' "$FAKE_REVISION" ;;
+      *) return 64 ;;
+    esac
+  }
+  curl() { builtin printf '{"status":"ok","revision":"%s"}' "$FAKE_REVISION"; }
+  jq() {
+    case "$*" in
+      *'.status // empty'*) cat >/dev/null; builtin printf 'ok\n' ;;
+      *'.revision // empty'*) cat >/dev/null; builtin printf '%s\n' "$FAKE_REVISION" ;;
+      *) cat >/dev/null || :; return 0 ;;
+    esac
+  }
+  tailscale() { builtin printf '{}'; }
+  inspect_runtime
+) >"$RUNTIME_OUTPUT" 2>&1
+runtime_status=$?
+set -e
+if [[ "$runtime_status" -eq 0 ]] || grep -q 'SAAS_RUNTIME_OK' "$RUNTIME_OUTPUT"; then
+  preflight_failures+=('failed Docker container inventory certified the SaaS runtime')
+fi
+
 HEADER_PREP_LOG="$TEST_DIR/header-prep.log"
 set +e
 (

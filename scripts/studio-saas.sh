@@ -337,7 +337,8 @@ provision() {
 }
 
 inspect_runtime() {
-  local spec image memory cpu managed replicas failure order parallelism update_delay update_monitor max_failure_ratio rollback_failure rollback_order rollback_parallelism rollback_delay rollback_monitor rollback_failure_ratio containers container health health_body revision labels endpoint_ports serve_status serve_key expected_proxy
+  local spec image memory cpu managed replicas failure order parallelism update_delay update_monitor max_failure_ratio rollback_failure rollback_order rollback_parallelism rollback_delay rollback_monitor rollback_failure_ratio container_inventory container health health_body revision labels endpoint_ports serve_status serve_key expected_proxy
+  local -a containers=()
   require_root
   load_state
   [[ -n "$APPLICATION_ID" && -n "$PUBLISHED_PORT" && -n "$HEALTH_PORT" ]] || die 'SaaS state is incomplete'
@@ -349,7 +350,9 @@ inspect_runtime() {
   [[ "$rollback_failure|$rollback_order|$rollback_parallelism|$rollback_delay|$rollback_monitor|$rollback_failure_ratio" == 'pause|stop-first|1|5s|30s|0' ]] || die 'SaaS rollback policy drifted'
   endpoint_ports="$(docker service inspect "$APP_NAME" --format '{{json .Endpoint.Spec.Ports}}')"
   jq -e --argjson published "$PUBLISHED_PORT" 'length==1 and .[0].Protocol=="tcp" and .[0].TargetPort==3000 and .[0].PublishedPort==$published and .[0].PublishMode=="ingress"' <<<"$endpoint_ports" >/dev/null || die 'SaaS published port policy drifted'
-  mapfile -t containers < <(docker ps --filter "label=com.docker.swarm.service.name=$APP_NAME" --filter status=running --format '{{.ID}}')
+  container_inventory="$(docker ps --filter "label=com.docker.swarm.service.name=$APP_NAME" --filter status=running --format '{{.ID}}')" ||
+    die 'cannot inspect running SaaS containers'
+  if [[ -n "$container_inventory" ]]; then mapfile -t containers <<<"$container_inventory"; fi
   [[ ${#containers[@]} -eq 1 ]] || die 'SaaS does not have exactly one running container'
   container="${containers[0]}"
   health="$(docker inspect "$container" --format '{{if .Config.Healthcheck}}{{.State.Health.Status}}{{else}}absent{{end}}')"
