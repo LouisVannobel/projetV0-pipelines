@@ -104,6 +104,90 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm run lint
+      - name: Production build
+        run: pnpm run build
+      - name: Unit and integration tests
+        id: source-tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf 'started=%s\n' "$(date +%s%3N)" >> "$GITHUB_OUTPUT"
+          pnpm run test
+      - name: Validate measured coverage when configured
+        env:
+          COVERAGE_TEST_STARTED: ${{ steps.source-tests.outputs.started }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'COVERAGE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const demand = (ok, code) => { if (!ok) throw new Error(`Invalid current source coverage: ${code}`); };
+          const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+          const root = fs.realpathSync('.');
+          const ownedFile = target => {
+            const absolute = path.resolve(target);
+            demand(absolute.startsWith(root + path.sep), 'checkout-path');
+            let cursor = absolute;
+            while (cursor !== root) {
+              demand(!fs.lstatSync(cursor).isSymbolicLink(), 'linked-path');
+              cursor = path.dirname(cursor);
+            }
+            const stat = fs.statSync(absolute);
+            demand(stat.isFile() && fs.realpathSync(absolute) === absolute, 'regular-file');
+            return stat;
+          };
+          const configPath = path.join(root, '.fallowrc.json');
+          if (!fs.existsSync(configPath)) {
+            console.log('Measured coverage not configured; existing test script retained.');
+          } else {
+            demand(ownedFile(configPath).size <= 1024 * 1024, 'config-size');
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            demand(object(config) && (config.health === undefined || object(config.health)), 'config-shape');
+            const configured = config.health?.coverage;
+            if (configured === undefined || configured === null) {
+              console.log('Measured coverage not configured; existing test script retained.');
+            } else {
+              demand(typeof configured === 'string' && configured.length > 0 && configured.length <= 2048 && !path.isAbsolute(configured), 'report-path');
+              const report = path.resolve(root, configured);
+              const stat = ownedFile(report);
+              const started = Number(process.env.COVERAGE_TEST_STARTED);
+              demand(Number.isSafeInteger(started) && started > 0 && started <= Date.now() && stat.mtimeMs >= started && stat.mtimeMs <= Date.now(), 'current-producer');
+              demand(stat.size > 0 && stat.size <= 64 * 1024 * 1024, 'report-size');
+              const coverage = JSON.parse(fs.readFileSync(report, 'utf8'));
+              demand(object(coverage) && Object.keys(coverage).length > 0, 'coverage-map');
+              let statements = 0, functions = 0;
+              for (const [filename, entry] of Object.entries(coverage)) {
+                demand(object(entry) && path.isAbsolute(filename) && filename === path.resolve(filename) && entry.path === filename, 'canonical-path');
+                const sourceStat = ownedFile(filename);
+                demand(sourceStat.size <= 16 * 1024 * 1024 && sourceStat.mtimeMs <= stat.mtimeMs, 'current-source');
+                const lines = fs.readFileSync(filename, 'utf8').split(/\r?\n/);
+                const point = value => object(value) && Number.isSafeInteger(value.line) && value.line >= 1 && value.line <= lines.length && Number.isSafeInteger(value.column) && value.column >= 0 && value.column <= lines[value.line - 1].length;
+                const location = value => object(value) && point(value.start) && point(value.end) && (value.end.line > value.start.line || value.end.line === value.start.line && value.end.column >= value.start.column);
+                const count = value => Number.isSafeInteger(value) && value >= 0;
+                for (const [maps, counters] of [['statementMap', 's'], ['fnMap', 'f'], ['branchMap', 'b']]) {
+                  demand(object(entry[maps]) && object(entry[counters]), 'maps-and-counters');
+                  const keys = Object.keys(entry[maps]);
+                  demand(keys.length === Object.keys(entry[counters]).length && keys.every(key => /^\d+$/.test(key) && Object.hasOwn(entry[counters], key)), 'counter-identities');
+                  for (const key of keys) {
+                    const map = entry[maps][key], value = entry[counters][key];
+                    if (maps === 'statementMap') {
+                      demand(location(map) && count(value), 'statement');
+                      statements++;
+                    } else if (maps === 'fnMap') {
+                      demand(object(map) && typeof map.name === 'string' && location(map.decl) && location(map.loc) && count(value), 'function');
+                      functions++;
+                    } else {
+                      demand(object(map) && typeof map.type === 'string' && map.type.length > 0 && location(map.loc) && Array.isArray(map.locations) && map.locations.length > 0 && map.locations.every(location) && Array.isArray(value) && value.length === map.locations.length && value.every(count), 'branch');
+                    }
+                  }
+                }
+              }
+              demand(statements > 0 && functions > 0, 'mapped-source');
+              console.log(`Current Istanbul source coverage admitted: ${Object.keys(coverage).length} files, ${statements} statements, ${functions} functions.`);
+            }
+          }
+          COVERAGE
       - name: Audit PR changes with Fallow
         if: github.event_name == 'pull_request'
         run: pnpm exec fallow audit --no-css --base "${{ github.event.pull_request.base.sha }}"
@@ -112,10 +196,6 @@ jobs:
         run: pnpm run doctor --scope changed --base "${{ github.event.pull_request.base.sha }}"
       - name: Typecheck
         run: pnpm run typecheck
-      - name: Unit and integration tests
-        run: pnpm run test
-      - name: Production build
-        run: pnpm run build
 
   accessibility:
     name: WCAG smoke tests
