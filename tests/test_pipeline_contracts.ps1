@@ -253,22 +253,139 @@ function Assert-SaasQualityFallowContract {
 
   $installIndex = $quality.IndexOf('- name: Install locked dependencies')
   $lintIndex = $quality.IndexOf('- name: Lint')
+  $buildIndex = $quality.IndexOf('- name: Production build')
+  $testsIndex = $quality.IndexOf('- name: Unit and integration tests')
+  $coverageIndex = $quality.IndexOf('- name: Validate measured coverage when configured')
   $fallowIndex = $quality.IndexOf('- name: Audit PR changes with Fallow')
   $doctorIndex = $quality.IndexOf('- name: React Doctor advisory')
   $typecheckIndex = $quality.IndexOf('- name: Typecheck')
-  if ($installIndex -lt 0 -or $lintIndex -le $installIndex -or $fallowIndex -le $lintIndex -or $doctorIndex -le $fallowIndex -or $typecheckIndex -le $doctorIndex) {
-    throw 'SaaS quality must install, lint, run Fallow, run React Doctor, then typecheck'
+  if ($installIndex -lt 0 -or $lintIndex -le $installIndex -or $buildIndex -le $lintIndex -or $testsIndex -le $buildIndex -or $coverageIndex -le $testsIndex -or $fallowIndex -le $coverageIndex -or $doctorIndex -le $fallowIndex -or $typecheckIndex -le $doctorIndex) {
+    throw 'SaaS quality must install, lint, build, test once, validate configured coverage, run Fallow, run React Doctor, then typecheck'
+  }
+  if (@([regex]::Matches($quality, '(?m)^\s+pnpm run test\s*$')).Count -ne 1) { throw 'SaaS quality must invoke the existing test script exactly once' }
+  if ($quality -match 'apt-get|coverage-v8|pnpm add|--coverage') { throw 'The reusable quality job must not install consumer-specific prerequisites or force coverage' }
+}
+
+function Assert-SaasCoverageRunBlock {
+  param([Parameter(Mandatory)][string]$Workflow)
+
+  $block = [regex]::Match($Workflow, "(?ms)^ {10}node --input-type=module <<'COVERAGE'\r?\n(?<script>.*?)^ {10}COVERAGE\s*$")
+  if (-not $block.Success) { throw 'Missing executable measured-coverage consumer' }
+  $script = ($block.Groups['script'].Value -split '\r?\n' | ForEach-Object { $_ -replace '^ {10}', '' }) -join "`n"
+  $root = [IO.Path]::GetFullPath((Get-Location).Path)
+  $temporary = Join-Path $root ('.tmp-saas-coverage-' + [guid]::NewGuid().ToString('N'))
+  [IO.Directory]::CreateDirectory($temporary) | Out-Null
+  try {
+    $scriptPath = Join-Path $temporary 'coverage.mjs'
+    [IO.File]::WriteAllText($scriptPath, $script)
+    $passed = 0
+    $failures = @()
+    $cases = @('no-config', 'fallback', 'null-fallback', 'invalid-coverage', 'valid', 'forward-source', 'relative-source', 'dot-source', 'repeat-source', 'uncovered', 'source-alias', 'duplicate-alias', 'missing', 'zero-bytes', 'empty', 'malformed', 'invalid-config', 'stale', 'future', 'linked-report', 'escape-report', 'escape-source', 'wrong-path', 'missing-counter', 'negative-counter', 'fraction-counter', 'branch-count', 'bad-position', 'no-functions', 'end-null', 'start-null', 'end-missing', 'end-negative', 'end-string', 'end-reversed', 'implicit-else', 'empty-statement', 'empty-first', 'empty-other-type', 'empty-single', 'empty-third', 'partial-empty', 'extra-empty-field', 'implicit-negative', 'implicit-counter-missing')
+    if ($IsWindows) { $cases += @('mixed-source', 'duplicate-format') }
+    foreach ($case in $cases) {
+      $directory = Join-Path $temporary $case
+      [IO.Directory]::CreateDirectory((Join-Path $directory 'src')) | Out-Null
+      [IO.Directory]::CreateDirectory((Join-Path $directory 'coverage')) | Out-Null
+      $source = Join-Path $directory 'src/sample.ts'
+      [IO.File]::WriteAllText($source, "export const a = () => 1;`n")
+      $location = @{ start = @{ line = 1; column = 0 }; end = @{ line = 1; column = 24 } }
+      $entry = @{ path = $source; statementMap = @{ '0' = $location }; s = @{ '0' = 1 }
+        fnMap = @{ '0' = @{ name = 'a'; decl = $location; loc = $location } }; f = @{ '0' = 1 }
+        branchMap = @{ '0' = @{ type = 'branch'; loc = $location; locations = @($location) } }; b = @{ '0' = @(1) } }
+      $report = Join-Path $directory 'coverage/coverage-final.json'
+      $config = @{ health = @{ coverage = 'coverage/coverage-final.json' } }
+      if ($case -eq 'fallback') { $config = @{} }
+      if ($case -eq 'null-fallback') { $config.health.coverage = $null }
+      if ($case -eq 'invalid-coverage') { $config.health.coverage = 42 }
+      if ($case -eq 'escape-report') { $config.health.coverage = '../outside.json' }
+      if ($case -eq 'linked-report') {
+        $alias = Join-Path $directory 'alias'
+        New-Item -ItemType $(if ($IsWindows) { 'Junction' } else { 'SymbolicLink' }) -Path $alias -Target (Join-Path $directory 'coverage') | Out-Null
+        $config.health.coverage = 'alias/coverage-final.json'
+      }
+      if ($case -eq 'escape-source') { $entry.path = $scriptPath; $source = $scriptPath }
+      if ($case -eq 'forward-source') { $source = $source.Replace('\', '/'); $entry.path = $source }
+      if ($case -eq 'relative-source') { $source = 'src/sample.ts'; $entry.path = $source }
+      if ($case -eq 'dot-source') { $source = (Join-Path $directory 'src') + [IO.Path]::DirectorySeparatorChar + '.' + [IO.Path]::DirectorySeparatorChar + 'sample.ts'; $entry.path = $source }
+      if ($case -eq 'repeat-source') { $source = (Join-Path $directory 'src') + [IO.Path]::DirectorySeparatorChar + [IO.Path]::DirectorySeparatorChar + 'sample.ts'; $entry.path = $source }
+      if ($case -eq 'mixed-source') { $source = $source.Substring(0, 3) + $source.Substring(3).Replace('\', '/'); $entry.path = $source }
+      if ($case -eq 'wrong-path') { $entry.path = Join-Path $directory 'src/other.ts' }
+      if ($case -eq 'missing-counter') { $entry.f = @{} }
+      if ($case -eq 'negative-counter') { $entry.f['0'] = -1 }
+      if ($case -eq 'fraction-counter') { $entry.s['0'] = 0.5 }
+      if ($case -eq 'branch-count') { $entry.b['0'] = @(1, 2) }
+      if ($case -eq 'bad-position') { $entry.fnMap['0'].loc = @{ start = @{ line = 99; column = 0 }; end = @{ line = 99; column = 1 } } }
+      if ($case -eq 'no-functions') { $entry.fnMap = @{}; $entry.f = @{} }
+      if ($case -eq 'uncovered') { $entry.f['0'] = 0; $entry.s['0'] = 0; $entry.b['0'] = @(0) }
+      if ($case -eq 'end-null') { $location.end.column = $null }
+      if ($case -eq 'start-null') { $location.start.column = $null }
+      if ($case -eq 'end-missing') { $location.end.Remove('column') }
+      if ($case -eq 'end-negative') { $location.end.column = -1 }
+      if ($case -eq 'end-string') { $location.end.column = 'Infinity' }
+      if ($case -eq 'end-reversed') { $location.start.column = 23; $location.end.column = 5 }
+      $emptyRange = @{ start = @{}; end = @{} }
+      if ($case -eq 'empty-statement') { $entry.statementMap['0'] = $emptyRange }
+      if ($case -in @('implicit-else', 'empty-first', 'empty-other-type', 'empty-single', 'empty-third', 'partial-empty', 'extra-empty-field', 'implicit-negative', 'implicit-counter-missing')) {
+        $branch = $entry.branchMap['0']; $branch.type = 'if'; $branch.locations = @($location, $emptyRange); $entry.b['0'] = @(1, 0)
+        if ($case -eq 'empty-first') { $branch.locations = @($emptyRange, $location) }
+        if ($case -eq 'empty-other-type') { $branch.type = 'branch' }
+        if ($case -eq 'empty-single') { $branch.locations = @($emptyRange); $entry.b['0'] = @(0) }
+        if ($case -eq 'empty-third') { $branch.locations = @($location, $location, $emptyRange); $entry.b['0'] = @(1, 1, 0) }
+        if ($case -eq 'partial-empty') { $emptyRange.end = @{ line = 1; column = $null } }
+        if ($case -eq 'extra-empty-field') { $emptyRange.extra = 'not-provider-shape' }
+        if ($case -eq 'implicit-negative') { $entry.b['0'] = @(1, -1) }
+        if ($case -eq 'implicit-counter-missing') { $entry.b['0'] = @(1) }
+      }
+      if ($case -ne 'no-config') { [IO.File]::WriteAllText((Join-Path $directory '.fallowrc.json'), $(if ($case -eq 'invalid-config') { '{bad' } else { $config | ConvertTo-Json -Depth 15 })) }
+      $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - 1000
+      if ($case -notin @('no-config', 'fallback', 'null-fallback', 'invalid-coverage', 'missing')) {
+        $map = @{}; $map[$source] = $entry
+        if ($case -in @('source-alias', 'duplicate-alias')) {
+          $alias = (Join-Path $directory 'src') + [IO.Path]::DirectorySeparatorChar + '..' + [IO.Path]::DirectorySeparatorChar + 'src' + [IO.Path]::DirectorySeparatorChar + 'sample.ts'
+          $aliasedEntry = $entry.Clone(); $aliasedEntry.path = $alias
+          $aliasedEntry.f = @{ '0' = 0 }; $aliasedEntry.s = @{ '0' = 0 }; $aliasedEntry.b = @{ '0' = @(0) }
+          if ($case -eq 'source-alias') { $map = @{} }
+          $map[$alias] = $aliasedEntry
+        }
+        if ($case -eq 'duplicate-format') {
+          $alias = $source.Replace('\', '/')
+          $aliasedEntry = $entry.Clone(); $aliasedEntry.path = $alias
+          $map[$alias] = $aliasedEntry
+        }
+        $json = if ($case -eq 'zero-bytes') { '' } elseif ($case -eq 'empty') { '{}' } elseif ($case -eq 'malformed') { '{bad' } else { $map | ConvertTo-Json -Depth 15 }
+        [IO.File]::WriteAllText($report, $json)
+        if ($case -eq 'stale') { [IO.File]::SetLastWriteTimeUtc($report, [DateTime]::UtcNow.AddMinutes(-5)) }
+        if ($case -eq 'future') { [IO.File]::SetLastWriteTimeUtc($report, [DateTime]::UtcNow.AddMinutes(5)) }
+      }
+      $priorStarted = $env:COVERAGE_TEST_STARTED
+      try {
+        $env:COVERAGE_TEST_STARTED = [string]$started
+        Push-Location $directory
+        try { $output = & node --max-old-space-size=64 $scriptPath 2>&1; $exit = $LASTEXITCODE } finally { Pop-Location }
+      } finally { $env:COVERAGE_TEST_STARTED = $priorStarted }
+      $accepted = $case -in @('no-config', 'fallback', 'null-fallback', 'valid', 'forward-source', 'uncovered', 'end-null', 'implicit-else')
+      if (($exit -eq 0) -ne $accepted) { $failures += "Measured coverage case '$case' has incorrect exit $exit`: $output" }
+      $passed++
+    }
+    if ($failures.Count) { throw ($failures -join "`n") }
+    Write-Output "SAAS_COVERAGE_CASES_OK $passed"
+  } finally {
+    $absolute = [IO.Path]::GetFullPath($temporary)
+    if ([IO.Path]::GetDirectoryName($absolute) -cne $root -or -not [IO.Path]::GetFileName($absolute).StartsWith('.tmp-saas-coverage-')) { throw 'Coverage fixture cleanup ownership mismatch' }
+    Remove-Item -LiteralPath $absolute -Recurse -Force
   }
 }
 
 $saasCi = Get-Content -Raw -LiteralPath '.github\workflows\reusable-saas-ci.yml'
 Assert-SaasQualityFallowContract -Workflow $saasCi
+Assert-SaasCoverageRunBlock -Workflow $saasCi
 
 $fallowContractMutations = @{
   'shallow checkout' = $saasCi.Replace('fetch-depth: 0', 'fetch-depth: 1')
   'non-PR execution' = $saasCi.Replace("if: github.event_name == 'pull_request'", 'if: true')
   'wrong audit base' = $saasCi.Replace('github.event.pull_request.base.sha', 'github.sha')
   'soft failure' = $saasCi.Replace('pnpm exec fallow audit --no-css --base "${{ github.event.pull_request.base.sha }}"', 'pnpm exec fallow audit --no-css --base "${{ github.event.pull_request.base.sha }}" || true')
+  'duplicate test run' = $saasCi.Replace('pnpm run test', "pnpm run test`n          pnpm run test")
 }
 foreach ($mutation in $fallowContractMutations.GetEnumerator()) {
   $rejected = $false

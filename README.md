@@ -2,6 +2,18 @@
 
 Workflows GitHub Actions réutilisables pour les SaaS du studio.
 
+## Qualité SaaS et couverture mesurée
+
+Le job qualité installe les dépendances verrouillées, lint, construit la production puis exécute une seule fois `pnpm run test`, avant Fallow, React Doctor et le typecheck. Chaque caller conserve son script de test et ses prérequis spécifiques ; ce workflow n'installe ni provider de couverture ni décodeur audio pour les autres dépôts.
+
+La couverture est opt-in via un chemin non null dans `health.coverage` de la `.fallowrc.json` du caller. Le test doit alors produire un JSON Istanbul non vide dans ce même checkout. Le contrôle refuse une carte manquante, malformée, périmée, liée ou extérieure, des chemins source non canoniques ou différents du checkout courant, ainsi que des positions/maps/counters incohérents. Les counters zéro sont valides : une fonction réellement non couverte ne devient pas couverte. Sans ce champ ou avec son défaut natif `null`, le script de test existant est conservé sans provider imposé ; toute autre valeur malformée est refusée.
+
+Les clés source et leur champ `path` doivent être identiques et absolument canoniques pour la plateforme courante. Sur Windows, la forme native et sa forme exacte avec `/`, produite par Istanbul, désignent la même identité source ; les mélanges de séparateurs, segments relatifs et doublons entre ces deux formes restent refusés. Le contrôle ne réécrit pas la carte.
+
+Le format natif `ast-v8-to-istanbul` peut sérialiser une colonne de fin Infinity en `null` : elle représente uniquement la fin de cette ligne source valide ; la colonne de début reste entière et bornée. Une alternative else implicite peut avoir exactement `{start:{},end:{}}`, seulement en seconde position des deux alternatives d'une branche `if` dont le range principal et la première alternative sont valides, avec deux counters entiers non négatifs. Ces deux formes ne réécrivent ni la carte ni ses counters ; les autres positions null/manquantes et ranges vides restent refusés.
+
+Ce contrôle de carte ne garantit pas que toutes les fonctions sont mesurées. Les callbacks de tests, sous-processus et SSR peuvent rester hors de la session de couverture du producer ; leur absence ne doit pas être remplacée par des counters fabriqués. Le caller doit vérifier les correspondances natives avec Fallow. L'audit PR reste bloquant avec son SHA de base exact ; le workflow ne change ni seuil ni sévérité et n'exécute pas une deuxième suite.
+
 ## Nouveau SaaS
 
 ```powershell
