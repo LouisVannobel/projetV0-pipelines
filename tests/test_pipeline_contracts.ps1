@@ -280,7 +280,7 @@ function Assert-SaasCoverageRunBlock {
     [IO.File]::WriteAllText($scriptPath, $script)
     $passed = 0
     $failures = @()
-    foreach ($case in @('no-config', 'fallback', 'null-fallback', 'invalid-coverage', 'valid', 'uncovered', 'source-alias', 'duplicate-alias', 'missing', 'zero-bytes', 'empty', 'malformed', 'invalid-config', 'stale', 'future', 'linked-report', 'escape-report', 'escape-source', 'wrong-path', 'missing-counter', 'negative-counter', 'fraction-counter', 'branch-count', 'bad-position', 'no-functions')) {
+    foreach ($case in @('no-config', 'fallback', 'null-fallback', 'invalid-coverage', 'valid', 'uncovered', 'source-alias', 'duplicate-alias', 'missing', 'zero-bytes', 'empty', 'malformed', 'invalid-config', 'stale', 'future', 'linked-report', 'escape-report', 'escape-source', 'wrong-path', 'missing-counter', 'negative-counter', 'fraction-counter', 'branch-count', 'bad-position', 'no-functions', 'end-null', 'start-null', 'end-missing', 'end-negative', 'end-string', 'end-reversed', 'implicit-else', 'empty-statement', 'empty-first', 'empty-other-type', 'empty-single', 'empty-third', 'partial-empty', 'extra-empty-field', 'implicit-negative', 'implicit-counter-missing')) {
       $directory = Join-Path $temporary $case
       [IO.Directory]::CreateDirectory((Join-Path $directory 'src')) | Out-Null
       [IO.Directory]::CreateDirectory((Join-Path $directory 'coverage')) | Out-Null
@@ -310,6 +310,25 @@ function Assert-SaasCoverageRunBlock {
       if ($case -eq 'bad-position') { $entry.fnMap['0'].loc = @{ start = @{ line = 99; column = 0 }; end = @{ line = 99; column = 1 } } }
       if ($case -eq 'no-functions') { $entry.fnMap = @{}; $entry.f = @{} }
       if ($case -eq 'uncovered') { $entry.f['0'] = 0; $entry.s['0'] = 0; $entry.b['0'] = @(0) }
+      if ($case -eq 'end-null') { $location.end.column = $null }
+      if ($case -eq 'start-null') { $location.start.column = $null }
+      if ($case -eq 'end-missing') { $location.end.Remove('column') }
+      if ($case -eq 'end-negative') { $location.end.column = -1 }
+      if ($case -eq 'end-string') { $location.end.column = 'Infinity' }
+      if ($case -eq 'end-reversed') { $location.start.column = 23; $location.end.column = 5 }
+      $emptyRange = @{ start = @{}; end = @{} }
+      if ($case -eq 'empty-statement') { $entry.statementMap['0'] = $emptyRange }
+      if ($case -in @('implicit-else', 'empty-first', 'empty-other-type', 'empty-single', 'empty-third', 'partial-empty', 'extra-empty-field', 'implicit-negative', 'implicit-counter-missing')) {
+        $branch = $entry.branchMap['0']; $branch.type = 'if'; $branch.locations = @($location, $emptyRange); $entry.b['0'] = @(1, 0)
+        if ($case -eq 'empty-first') { $branch.locations = @($emptyRange, $location) }
+        if ($case -eq 'empty-other-type') { $branch.type = 'branch' }
+        if ($case -eq 'empty-single') { $branch.locations = @($emptyRange); $entry.b['0'] = @(0) }
+        if ($case -eq 'empty-third') { $branch.locations = @($location, $location, $emptyRange); $entry.b['0'] = @(1, 1, 0) }
+        if ($case -eq 'partial-empty') { $emptyRange.end = @{ line = 1; column = $null } }
+        if ($case -eq 'extra-empty-field') { $emptyRange.extra = 'not-provider-shape' }
+        if ($case -eq 'implicit-negative') { $entry.b['0'] = @(1, -1) }
+        if ($case -eq 'implicit-counter-missing') { $entry.b['0'] = @(1) }
+      }
       if ($case -ne 'no-config') { [IO.File]::WriteAllText((Join-Path $directory '.fallowrc.json'), $(if ($case -eq 'invalid-config') { '{bad' } else { $config | ConvertTo-Json -Depth 15 })) }
       $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - 1000
       if ($case -notin @('no-config', 'fallback', 'null-fallback', 'invalid-coverage', 'missing')) {
@@ -332,7 +351,7 @@ function Assert-SaasCoverageRunBlock {
         Push-Location $directory
         try { $output = & node --max-old-space-size=64 $scriptPath 2>&1; $exit = $LASTEXITCODE } finally { Pop-Location }
       } finally { $env:COVERAGE_TEST_STARTED = $priorStarted }
-      $accepted = $case -in @('no-config', 'fallback', 'null-fallback', 'valid', 'uncovered')
+      $accepted = $case -in @('no-config', 'fallback', 'null-fallback', 'valid', 'uncovered', 'end-null', 'implicit-else')
       if (($exit -eq 0) -ne $accepted) { $failures += "Measured coverage case '$case' has incorrect exit $exit`: $output" }
       $passed++
     }
@@ -341,7 +360,7 @@ function Assert-SaasCoverageRunBlock {
   } finally {
     $absolute = [IO.Path]::GetFullPath($temporary)
     if ([IO.Path]::GetDirectoryName($absolute) -cne $root -or -not [IO.Path]::GetFileName($absolute).StartsWith('.tmp-saas-coverage-')) { throw 'Coverage fixture cleanup ownership mismatch' }
-    Remove-Item -LiteralPath $absolute -Recurse
+    Remove-Item -LiteralPath $absolute -Recurse -Force
   }
 }
 
