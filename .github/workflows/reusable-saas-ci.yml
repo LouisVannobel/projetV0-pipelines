@@ -157,11 +157,15 @@ jobs:
               const coverage = JSON.parse(fs.readFileSync(report, 'utf8'));
               demand(object(coverage) && Object.keys(coverage).length > 0, 'coverage-map');
               let statements = 0, functions = 0;
+              const sourcePaths = new Set();
               for (const [filename, entry] of Object.entries(coverage)) {
-                demand(object(entry) && path.isAbsolute(filename) && filename === path.resolve(filename) && entry.path === filename, 'canonical-path');
-                const sourceStat = ownedFile(filename);
+                const absolute = path.resolve(filename);
+                demand(object(entry) && path.isAbsolute(filename) && (filename === absolute || process.platform === 'win32' && filename === absolute.replaceAll('\\', '/')) && entry.path === filename, 'canonical-path');
+                demand(!sourcePaths.has(absolute), 'duplicate-source');
+                sourcePaths.add(absolute);
+                const sourceStat = ownedFile(absolute);
                 demand(sourceStat.size <= 16 * 1024 * 1024 && sourceStat.mtimeMs <= stat.mtimeMs, 'current-source');
-                const lines = fs.readFileSync(filename, 'utf8').split(/\r?\n/);
+                const lines = fs.readFileSync(absolute, 'utf8').split(/\r?\n/);
                 const point = (value, end = false) => object(value) && Number.isSafeInteger(value.line) && value.line >= 1 && value.line <= lines.length && (end && value.column === null || Number.isSafeInteger(value.column) && value.column >= 0 && value.column <= lines[value.line - 1].length);
                 const location = value => {
                   if (!object(value) || !point(value.start) || !point(value.end, true)) return false;

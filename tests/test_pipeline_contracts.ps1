@@ -280,7 +280,9 @@ function Assert-SaasCoverageRunBlock {
     [IO.File]::WriteAllText($scriptPath, $script)
     $passed = 0
     $failures = @()
-    foreach ($case in @('no-config', 'fallback', 'null-fallback', 'invalid-coverage', 'valid', 'uncovered', 'source-alias', 'duplicate-alias', 'missing', 'zero-bytes', 'empty', 'malformed', 'invalid-config', 'stale', 'future', 'linked-report', 'escape-report', 'escape-source', 'wrong-path', 'missing-counter', 'negative-counter', 'fraction-counter', 'branch-count', 'bad-position', 'no-functions', 'end-null', 'start-null', 'end-missing', 'end-negative', 'end-string', 'end-reversed', 'implicit-else', 'empty-statement', 'empty-first', 'empty-other-type', 'empty-single', 'empty-third', 'partial-empty', 'extra-empty-field', 'implicit-negative', 'implicit-counter-missing')) {
+    $cases = @('no-config', 'fallback', 'null-fallback', 'invalid-coverage', 'valid', 'forward-source', 'relative-source', 'dot-source', 'repeat-source', 'uncovered', 'source-alias', 'duplicate-alias', 'missing', 'zero-bytes', 'empty', 'malformed', 'invalid-config', 'stale', 'future', 'linked-report', 'escape-report', 'escape-source', 'wrong-path', 'missing-counter', 'negative-counter', 'fraction-counter', 'branch-count', 'bad-position', 'no-functions', 'end-null', 'start-null', 'end-missing', 'end-negative', 'end-string', 'end-reversed', 'implicit-else', 'empty-statement', 'empty-first', 'empty-other-type', 'empty-single', 'empty-third', 'partial-empty', 'extra-empty-field', 'implicit-negative', 'implicit-counter-missing')
+    if ($IsWindows) { $cases += @('mixed-source', 'duplicate-format') }
+    foreach ($case in $cases) {
       $directory = Join-Path $temporary $case
       [IO.Directory]::CreateDirectory((Join-Path $directory 'src')) | Out-Null
       [IO.Directory]::CreateDirectory((Join-Path $directory 'coverage')) | Out-Null
@@ -302,6 +304,11 @@ function Assert-SaasCoverageRunBlock {
         $config.health.coverage = 'alias/coverage-final.json'
       }
       if ($case -eq 'escape-source') { $entry.path = $scriptPath; $source = $scriptPath }
+      if ($case -eq 'forward-source') { $source = $source.Replace('\', '/'); $entry.path = $source }
+      if ($case -eq 'relative-source') { $source = 'src/sample.ts'; $entry.path = $source }
+      if ($case -eq 'dot-source') { $source = (Join-Path $directory 'src') + [IO.Path]::DirectorySeparatorChar + '.' + [IO.Path]::DirectorySeparatorChar + 'sample.ts'; $entry.path = $source }
+      if ($case -eq 'repeat-source') { $source = (Join-Path $directory 'src') + [IO.Path]::DirectorySeparatorChar + [IO.Path]::DirectorySeparatorChar + 'sample.ts'; $entry.path = $source }
+      if ($case -eq 'mixed-source') { $source = $source.Substring(0, 3) + $source.Substring(3).Replace('\', '/'); $entry.path = $source }
       if ($case -eq 'wrong-path') { $entry.path = Join-Path $directory 'src/other.ts' }
       if ($case -eq 'missing-counter') { $entry.f = @{} }
       if ($case -eq 'negative-counter') { $entry.f['0'] = -1 }
@@ -340,6 +347,11 @@ function Assert-SaasCoverageRunBlock {
           if ($case -eq 'source-alias') { $map = @{} }
           $map[$alias] = $aliasedEntry
         }
+        if ($case -eq 'duplicate-format') {
+          $alias = $source.Replace('\', '/')
+          $aliasedEntry = $entry.Clone(); $aliasedEntry.path = $alias
+          $map[$alias] = $aliasedEntry
+        }
         $json = if ($case -eq 'zero-bytes') { '' } elseif ($case -eq 'empty') { '{}' } elseif ($case -eq 'malformed') { '{bad' } else { $map | ConvertTo-Json -Depth 15 }
         [IO.File]::WriteAllText($report, $json)
         if ($case -eq 'stale') { [IO.File]::SetLastWriteTimeUtc($report, [DateTime]::UtcNow.AddMinutes(-5)) }
@@ -351,7 +363,7 @@ function Assert-SaasCoverageRunBlock {
         Push-Location $directory
         try { $output = & node --max-old-space-size=64 $scriptPath 2>&1; $exit = $LASTEXITCODE } finally { Pop-Location }
       } finally { $env:COVERAGE_TEST_STARTED = $priorStarted }
-      $accepted = $case -in @('no-config', 'fallback', 'null-fallback', 'valid', 'uncovered', 'end-null', 'implicit-else')
+      $accepted = $case -in @('no-config', 'fallback', 'null-fallback', 'valid', 'forward-source', 'uncovered', 'end-null', 'implicit-else')
       if (($exit -eq 0) -ne $accepted) { $failures += "Measured coverage case '$case' has incorrect exit $exit`: $output" }
       $passed++
     }
