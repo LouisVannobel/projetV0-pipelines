@@ -4,6 +4,7 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="$ROOT/.github/workflows/reusable-saas-ci.yml"
 # Execute the gate shipped to callers, rather than a second implementation.
+# The gate is the final job and contains one run block; normalize checkout EOLs.
 gate_script="$(sed 's/\r$//' "$WORKFLOW" | sed -n '/^  gate:$/,$p' | sed -n '/^        run: |$/,$p' | sed '1d;s/^          //')"
 [[ -n "$gate_script" ]] || { echo 'Missing SaaS gate run block' >&2; exit 1; }
 

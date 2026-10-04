@@ -405,13 +405,27 @@ foreach ($resultVariable in @('SECRETS_AND_SOURCE_RESULT', 'QUALITY_RESULT', 'AC
 }
 if ($gate -notmatch '(?ms)case "\$SECRETS_AND_SOURCE_RESULT" in.*?success\) ;;.*?\*\).*?exit 1.*?esac') { throw 'SaaS gate must reject non-success required results' }
 if ($gate -notmatch '(?ms)case "\$QUALITY_RESULT" in.*?success\) ;;.*?\*\).*?exit 1.*?esac') { throw 'SaaS gate must reject non-success required results' }
-foreach ($binding in @(
-  'RUN_A11Y: ${{ inputs.run-a11y }}',
-  'RUN_CONTAINER: ${{ inputs.run-container }}',
-  'ACCESSIBILITY_RESULT: ${{ needs.accessibility.result }}',
-  'CONTAINER_RESULT: ${{ needs.container.result }}'
-)) {
-  if (-not $gate.Contains($binding)) { throw "SaaS gate must bind the caller option or actual result: $binding" }
+function Assert-SaasGateBindings {
+  param([Parameter(Mandatory)][string]$Gate)
+
+  foreach ($binding in @(
+    'SECRETS_AND_SOURCE_RESULT: ${{ needs.secrets-and-source.result }}',
+    'QUALITY_RESULT: ${{ needs.quality.result }}',
+    'RUN_A11Y: ${{ inputs.run-a11y }}',
+    'RUN_CONTAINER: ${{ inputs.run-container }}',
+    'ACCESSIBILITY_RESULT: ${{ needs.accessibility.result }}',
+    'CONTAINER_RESULT: ${{ needs.container.result }}'
+  )) {
+    if (-not $Gate.Contains($binding)) { throw "SaaS gate must bind the caller option or actual result: $binding" }
+  }
+}
+Assert-SaasGateBindings -Gate $gate
+foreach ($result in @('secrets-and-source', 'quality')) {
+  $mutation = $gate.Replace(('${{ needs.' + $result + '.result }}'), 'success')
+  if ($mutation -ceq $gate) { throw 'Mandatory gate binding mutation did not alter the job' }
+  $rejected = $false
+  try { Assert-SaasGateBindings -Gate $mutation } catch { $rejected = $true }
+  if (-not $rejected) { throw 'SaaS gate binding contract accepted a fabricated mandatory success' }
 }
 if ($gate -match '(?i)permissions:.*(write|read-all)') { throw 'SaaS gate must not request write permissions' }
 
