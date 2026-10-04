@@ -400,13 +400,59 @@ if ($gate -notmatch '(?m)^    if:\s*\$\{\{\s*always\(\)\s*\}\}\s*$') { throw 'Sa
 foreach ($requiredJob in @('secrets-and-source', 'quality', 'accessibility', 'container')) {
   if ($gate -notmatch [regex]::Escape($requiredJob)) { throw "SaaS gate must consume job: $requiredJob" }
 }
-foreach ($resultVariable in @('SECRETS_AND_SOURCE_RESULT', 'QUALITY_RESULT', 'ACCESSIBILITY_RESULT', 'CONTAINER_RESULT')) {
+foreach ($resultVariable in @('SECRETS_AND_SOURCE_RESULT', 'QUALITY_RESULT', 'ACCESSIBILITY_RESULT', 'CONTAINER_RESULT', 'RUN_A11Y', 'RUN_CONTAINER')) {
   if ($gate -notmatch [regex]::Escape($resultVariable)) { throw "SaaS gate step must validate $resultVariable" }
 }
 if ($gate -notmatch '(?ms)case "\$SECRETS_AND_SOURCE_RESULT" in.*?success\) ;;.*?\*\).*?exit 1.*?esac') { throw 'SaaS gate must reject non-success required results' }
 if ($gate -notmatch '(?ms)case "\$QUALITY_RESULT" in.*?success\) ;;.*?\*\).*?exit 1.*?esac') { throw 'SaaS gate must reject non-success required results' }
-if ($gate -notmatch '(?ms)for result in "\$ACCESSIBILITY_RESULT" "\$CONTAINER_RESULT"; do.*?case "\$result" in.*?success\|skipped\) ;;.*?\*\).*?exit 1.*?esac.*?done') { throw 'SaaS gate must reject non-success/non-skipped optional results' }
+function Assert-SaasGateBindings {
+  param([Parameter(Mandatory)][string]$Gate)
+
+  foreach ($binding in @(
+    'SECRETS_AND_SOURCE_RESULT: ${{ needs.secrets-and-source.result }}',
+    'QUALITY_RESULT: ${{ needs.quality.result }}',
+    'RUN_A11Y: ${{ inputs.run-a11y }}',
+    'RUN_CONTAINER: ${{ inputs.run-container }}',
+    'ACCESSIBILITY_RESULT: ${{ needs.accessibility.result }}',
+    'CONTAINER_RESULT: ${{ needs.container.result }}'
+  )) {
+    if (-not $Gate.Contains($binding)) { throw "SaaS gate must bind the caller option or actual result: $binding" }
+  }
+}
+Assert-SaasGateBindings -Gate $gate
+foreach ($result in @('secrets-and-source', 'quality')) {
+  $mutation = $gate.Replace(('${{ needs.' + $result + '.result }}'), 'success')
+  if ($mutation -ceq $gate) { throw 'Mandatory gate binding mutation did not alter the job' }
+  $rejected = $false
+  try { Assert-SaasGateBindings -Gate $mutation } catch { $rejected = $true }
+  if (-not $rejected) { throw 'SaaS gate binding contract accepted a fabricated mandatory success' }
+}
 if ($gate -match '(?i)permissions:.*(write|read-all)') { throw 'SaaS gate must not request write permissions' }
+
+function Assert-SaasContainerDependencies {
+  param([Parameter(Mandatory)][string]$Workflow)
+
+  $container = [regex]::Match($Workflow, '(?ms)^  container:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
+  if (-not $container) { throw 'Reusable SaaS CI must expose the container scan' }
+  if ($container -notmatch '(?m)^    if:\s*inputs\.run-container\s*$') { throw 'The container option must control actual scan execution' }
+  if ($container -notmatch '(?m)^    needs:\s*\[secrets-and-source\]\s*$') { throw 'The image scan must depend only on source security, never quality or Fallow' }
+  if ($container -match '(?m)^\s+continue-on-error:') { throw 'Image build and scan failures must propagate' }
+  if ($container -notmatch "(?m)^\s+exit-code:\s*'1'\s*$") { throw 'Image security findings must fail the job' }
+}
+Assert-SaasContainerDependencies -Workflow $saasCi
+foreach ($mutation in @(
+  $saasCi.Replace('needs: [secrets-and-source]', 'needs: [secrets-and-source, quality]'),
+  $saasCi.Replace('needs: [secrets-and-source]', 'needs: []'),
+  $saasCi.Replace('if: inputs.run-container', 'if: always()'),
+  $saasCi.Replace('  container:', "  container:`n    continue-on-error: true"),
+  $saasCi.Replace("exit-code: '1'", "exit-code: '0'")
+)) {
+  if ($mutation -ceq $saasCi) { throw 'Container dependency mutation did not alter the workflow' }
+  $rejected = $false
+  try { Assert-SaasContainerDependencies -Workflow $mutation } catch { $rejected = $true }
+  if (-not $rejected) { throw 'Container dependency contract accepted a coupled or advisory image scan' }
+}
+if (-not $selfValidation.Contains('bash tests/test_saas_ci_gate.sh')) { throw 'Pipeline validation must execute the actual SaaS gate behavior cases' }
 
 $containerRelease = Get-Content -Raw -LiteralPath '.github\workflows\reusable-container-release.yml'
 $containerBuilds = @([regex]::Matches($containerRelease, '(?m)^\s*uses:\s+docker/build-push-action@[0-9a-f]{40}'))

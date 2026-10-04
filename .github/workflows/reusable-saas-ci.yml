@@ -240,7 +240,7 @@ jobs:
   container:
     name: Build and scan production image
     if: inputs.run-container
-    needs: [secrets-and-source, quality]
+    needs: [secrets-and-source]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -286,6 +286,8 @@ jobs:
           QUALITY_RESULT: ${{ needs.quality.result }}
           ACCESSIBILITY_RESULT: ${{ needs.accessibility.result }}
           CONTAINER_RESULT: ${{ needs.container.result }}
+          RUN_A11Y: ${{ inputs.run-a11y }}
+          RUN_CONTAINER: ${{ inputs.run-container }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -297,9 +299,11 @@ jobs:
             success) ;;
             *) echo "quality result was $QUALITY_RESULT"; exit 1 ;;
           esac
-          for result in "$ACCESSIBILITY_RESULT" "$CONTAINER_RESULT"; do
-            case "$result" in
-              success|skipped) ;;
-              *) echo "optional CI result was $result"; exit 1 ;;
-            esac
-          done
+          case "$RUN_A11Y:$ACCESSIBILITY_RESULT" in
+            true:success|false:skipped) ;;
+            *) echo "accessibility enabled=$RUN_A11Y result=$ACCESSIBILITY_RESULT"; exit 1 ;;
+          esac
+          case "$RUN_CONTAINER:$CONTAINER_RESULT" in
+            true:success|false:skipped) ;;
+            *) echo "container enabled=$RUN_CONTAINER result=$CONTAINER_RESULT"; exit 1 ;;
+          esac

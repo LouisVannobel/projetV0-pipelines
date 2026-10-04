@@ -2,6 +2,14 @@
 
 Workflows GitHub Actions réutilisables pour les SaaS du studio.
 
+## Gate SaaS et indépendance des contrôles
+
+Le check agrégé `CI / gate` s'exécute même après un échec ou un job sauté. Sécurité source et qualité doivent réussir. Pour `run-a11y` et `run-container`, une option activée exige `success` ; une option désactivée exige `skipped`. Un échec, une annulation ou un contrôle activé mais sauté garde le gate rouge. Le caller doit rendre le nom complet de ce check obligatoire sur sa branche principale ; le workflow seul ne protège pas une branche.
+
+La construction et le scan Trivy de l'image dépendent uniquement de la sécurité source. Un échec de lint, de tests, de couverture ou de Fallow ne les empêche donc plus de démarrer. Une image ne peut être scannée que si sa construction réussit. Les qualifications natives supplémentaires restent dans chaque produit ; le workflow générique conserve une seule exécution de son script de test.
+
+Les contrats locaux exécutent le vrai script du gate sur les résultats activés, désactivés, échoués et sautés, et vérifient ses dépendances. Avant de propager une nouvelle révision aux templates, qualifier aussi le commit exact dans `projetv0-saas-smoke`, avec un cas nominal et un échec Fallow où le scan d'image réussit mais le gate reste rouge. Les tests locaux ne remplacent pas cette preuve GitHub Actions. Publier ensuite un nouveau tag immuable et mettre à jour les pins des consommateurs approuvés ; ne pas déplacer un tag existant.
+
 ## Qualité SaaS et couverture mesurée
 
 Le job qualité installe les dépendances verrouillées, lint, construit la production puis exécute une seule fois `pnpm run test`, avant Fallow, React Doctor et le typecheck. Chaque caller conserve son script de test et ses prérequis spécifiques ; ce workflow n'installe ni provider de couverture ni décodeur audio pour les autres dépôts.
