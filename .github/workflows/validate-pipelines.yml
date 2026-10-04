@@ -21,6 +21,9 @@ jobs:
       - name: Test reusable workflow contracts
         shell: pwsh
         run: pwsh -File tests/test_pipeline_contracts.ps1
+      - name: Test SaaS gate enabled and skipped outcomes
+        shell: bash
+        run: bash tests/test_saas_ci_gate.sh
       - name: Test isolated OCI release contract
         shell: pwsh
         run: pwsh -NoProfile -File tests/test_oci_release_contracts.ps1
