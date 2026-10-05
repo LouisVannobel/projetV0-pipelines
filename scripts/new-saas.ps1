@@ -7,8 +7,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $owner = 'LouisVannobel'
 $template = 'LouisVannobel/projetV0-saas-template'
-$templateRevision = 'b7415a7fa72ae0baebf2eced6d21efcc941c0ae8'
-$pipelineRevision = '9df204d23475ca7a00922307e7df825531211db2'
+$templateRevision = '1420019054e9a5a8981726df25adebb96873e56b'
+$pipelineRevision = 'ea76863f0150367edd8ceeec9bf43661e28d1597'
 $opsHost = 'ops01'
 $repo = "$owner/$Slug"
 $dokployUrl = 'https://ops01.tail87a1b6.ts.net:8442/api'

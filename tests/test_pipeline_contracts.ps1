@@ -607,7 +607,7 @@ function Assert-TailscalePayloadPin([string]$DeployJob) {
     throw 'The local deploy job must invoke Tailscale exactly once'
   }
   if (@([regex]::Matches($DeployJob, '(?m)^ {8}uses: LouisVannobel/projetV0-pipelines/[.]github/actions/deploy-dokploy@')).Count -ne 1 -or
-      $dokployStep.Value -notmatch '(?m)^ {8}uses: LouisVannobel/projetV0-pipelines/[.]github/actions/deploy-dokploy@3f385a4857ff7a85fcaa414296321154783272da # v1[.]4[.]0\r?$') {
+      $dokployStep.Value -notmatch '(?m)^ {8}uses: LouisVannobel/projetV0-pipelines/[.]github/actions/deploy-dokploy@ea76863f0150367edd8ceeec9bf43661e28d1597 # v1[.]6[.]0\r?$') {
     throw 'The second production step must retain the immutable reviewed Dokploy action pin'
   }
   if ($tailscaleStep.Value -notmatch '(?m)^ {8}uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4[.]2[.]0\r?$') {

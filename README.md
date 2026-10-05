@@ -6,7 +6,7 @@ Workflows GitHub Actions réutilisables pour les SaaS du studio.
 
 Le check agrégé `CI / gate` s'exécute même après un échec ou un job sauté. Sécurité source et qualité doivent réussir. Pour `run-a11y` et `run-container`, une option activée exige `success` ; une option désactivée exige `skipped`. Un échec, une annulation ou un contrôle activé mais sauté garde le gate rouge. Le caller doit rendre le nom complet de ce check obligatoire sur sa branche principale ; le workflow seul ne protège pas une branche.
 
-La version CI qualifiée `v1.5.0` pointe vers `5b464b9b2d47bc867d3c046c924244c3f9c2d609`. Son arbre fusionné est identique au candidat examiné et qualifié dans `projetv0-saas-smoke` : échec Fallow avec scan d'image réussi et gate rouge, options explicitement désactivées acceptées, puis run final entièrement vert. `examples/saas-ci.yml` utilise ce SHA immuable. Le pin du template attendu par le générateur est coordonné séparément après sa fusion ; il ne faut pas exécuter une ancienne copie du générateur contre un nouveau `main` du template.
+La version qualifiée `v1.6.0` pointe vers `ea76863f0150367edd8ceeec9bf43661e28d1597`. Son arbre fusionné est identique au candidat `153f6f0a6f98c2f6def1f3e5b70044bf281370c8` : warnings de complexité visibles avec gate vert, erreurs structurelles et cas mixtes rouges avec scan d'image réussi, puis consommateurs finaux entièrement verts sans canaries. Le smoke OCI qualifie aussi les outils Buildx/BuildKit/Trivy/SBOM et la promotion du digest. Les exemples utilisent ce SHA immuable ; les tags précédents ne sont pas déplacés. Le pin du template du générateur est coordonné après sa fusion.
 
 La construction et le scan Trivy de l'image dépendent uniquement de la sécurité source. Un échec de lint, de tests, de couverture ou de Fallow ne les empêche donc plus de démarrer. Une image ne peut être scannée que si sa construction réussit. Les qualifications natives supplémentaires restent dans chaque produit ; le workflow générique conserve une seule exécution de son script de test.
 
@@ -34,7 +34,7 @@ pwsh -File scripts/new-saas.ps1 invoice-ai
 
 Cette commande crée le dépôt privé depuis le template, une application Dokploy et une identité dédiée, applique les protections GitHub, puis attend la première release saine. Le profil standard est volontairement fixe : stateless, `ops01`, `/health`, 512 MiB, 1 CPU, sans domaine public, base, Redis ni stockage.
 
-Le générateur courant attend exactement le template accepté `b7415a7fa72ae0baebf2eced6d21efcc941c0ae8`, dont le caller CI utilise `v1.5.0`. Les refus de dérive du template et des fichiers critiques restent actifs. Cette coordination ne modifie ni le helper installé ni le pin du workflow de release ; les qualifications produit du candidat TanStack/Effect restent distinctes de ce profil historique.
+Le générateur courant attend exactement le template accepté `1420019054e9a5a8981726df25adebb96873e56b`, dont les callers CI et release utilisent `v1.6.0` (`ea76863f0150367edd8ceeec9bf43661e28d1597`). Les refus de dérive du template et des fichiers critiques restent actifs. Le helper installé conserve ses octets et son empreinte approuvés ; les qualifications produit du candidat TanStack/Effect restent distinctes de ce profil historique. Cette intégration ne déclenche aucun déploiement.
 
 L'installation ou la mise à jour root du helper est une opération de plateforme séparée : `pwsh -File scripts/install-studio-saas.ps1`. Elle ne fait pas partie de la création normale d'un SaaS.
 
