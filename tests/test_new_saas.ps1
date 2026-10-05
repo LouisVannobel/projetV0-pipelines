@@ -51,7 +51,7 @@ if ($localSource -notmatch '(?s)StandardOutput[.]BaseStream[.]CopyTo\(.*Standard
 foreach ($required in @('template_repository.full_name', '$templateRevision', 'ea76863f0150367edd8ceeec9bf43661e28d1597', 'STUDIO_SAAS_VERSION', 'sshProcess.ExitCode', 'ghProcess.ExitCode', 'gh run rerun $run.databaseId --repo $repo --failed')) {
   if (-not $localSource.Contains($required)) { throw "new-saas omits required collision/transport guard: $required" }
 }
-if (-not $localSource.Contains("`$templateRevision = '1420019054e9a5a8981726df25adebb96873e56b'")) {
+if (-not $localSource.Contains("`$templateRevision = '0f8180d20451a84d729b1b361ada2ebf0be1db34'")) {
   throw 'new-saas must pin the reviewed template commit'
 }
 if ($localSource.Contains('$installCommand') -or $localSource -match 'install .*studio-saas') {
