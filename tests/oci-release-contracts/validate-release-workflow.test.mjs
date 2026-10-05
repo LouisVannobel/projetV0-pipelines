@@ -54,6 +54,54 @@ test('release validator CLI reads only its fixed repository workflow', () => {
   assert.match(redirected.stderr, /does not accept paths/);
 });
 
+test('both validator CLIs fail closed on hostile YAML with the installed parser', () => {
+  const root = fs.mkdtempSync(path.join(here, '.yaml-cli-'));
+  assert.ok(root.startsWith(here + path.sep));
+  const isolatedTests = path.join(root, 'tests', 'oci-release-contracts');
+  const workflows = path.join(root, '.github', 'workflows');
+  const examples = path.join(root, 'examples');
+  fs.mkdirSync(path.join(isolatedTests, 'fixtures'), { recursive: true });
+  fs.mkdirSync(workflows, { recursive: true });
+  fs.mkdirSync(examples, { recursive: true });
+  const production = path.resolve(here, '..', '..');
+  for (const file of ['validate-release-workflow.mjs', 'validate-smoke-workflow.mjs']) {
+    fs.copyFileSync(path.join(here, file), path.join(isolatedTests, file));
+  }
+  fs.writeFileSync(path.join(isolatedTests, 'fixtures', 'valid-release-workflow.yml'), validSource);
+  fs.copyFileSync(path.join(production, 'examples', 'oci-release.yml'), path.join(examples, 'oci-release.yml'));
+  const cases = {
+    duplicate: 'jobs: {}\njobs: {}\n',
+    multiple: 'jobs: {}\n---\njobs: {}\n',
+    malformed: 'jobs: [\n',
+    undefinedAlias: 'jobs: *missing\n',
+    recursiveMerge: 'jobs: &jobs { <<: *jobs }\n',
+    amplification: 'a: &a [0,1,2,3,4,5,6,7,8,9]\n' +
+      'b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a,*a]\n' +
+      'c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b,*b]\n' +
+      'jobs: [*c,*c,*c,*c,*c,*c,*c,*c,*c,*c]\n',
+  };
+  try {
+    for (const [name, source] of Object.entries(cases)) {
+      for (const [validator, workflow] of [
+        ['validate-release-workflow.mjs', 'reusable-oci-release.yml'],
+        ['validate-smoke-workflow.mjs', 'smoke-oci-release.yml'],
+      ]) {
+        fs.writeFileSync(path.join(workflows, workflow), source);
+        const result = spawnSync(process.execPath, [path.join(isolatedTests, validator)], {
+          encoding: 'utf8', timeout: 5000,
+        });
+        assert.equal(result.error, undefined, `${validator}/${name}: ${result.error}`);
+        assert.equal(result.signal, null, `${validator}/${name}: unexpected termination`);
+        assert.equal(result.status, 1, `${validator}/${name}: ${result.stdout}\n${result.stderr}`);
+        assert.ok(result.stderr.trim(), `${validator}/${name}: failure must be visible`);
+      }
+    }
+  } finally {
+    assert.ok(root.startsWith(here + path.sep));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 rejectsObjectMutation('rejects a result step without canonical output emission', (workflow) => {
   stepById(workflow, 'promote', 'result').run = 'echo result';
 }, 'run scalar:');
