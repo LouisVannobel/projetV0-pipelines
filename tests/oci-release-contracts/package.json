@@ -6,6 +6,6 @@
     "test": "node --test validate-release-workflow.test.mjs test-release-run-blocks.mjs validate-smoke-workflow.test.mjs test-smoke-run-block.mjs validate-test-harness-security.test.mjs"
   },
   "devDependencies": {
-    "yaml": "2.8.3"
+    "yaml": "2.9.1"
   }
 }
