@@ -48,10 +48,10 @@ foreach ($required in @(
 if ($localSource -notmatch '(?s)StandardOutput[.]BaseStream[.]CopyTo\(.*StandardInput[.]BaseStream\)') {
   throw 'Dokploy API key must pass directly from the root helper to gh secret set over stdin'
 }
-foreach ($required in @('template_repository.full_name', '$templateRevision', '9df204d23475ca7a00922307e7df825531211db2', 'STUDIO_SAAS_VERSION', 'sshProcess.ExitCode', 'ghProcess.ExitCode', 'gh run rerun $run.databaseId --repo $repo --failed')) {
+foreach ($required in @('template_repository.full_name', '$templateRevision', 'ea76863f0150367edd8ceeec9bf43661e28d1597', 'STUDIO_SAAS_VERSION', 'sshProcess.ExitCode', 'ghProcess.ExitCode', 'gh run rerun $run.databaseId --repo $repo --failed')) {
   if (-not $localSource.Contains($required)) { throw "new-saas omits required collision/transport guard: $required" }
 }
-if (-not $localSource.Contains("`$templateRevision = 'b7415a7fa72ae0baebf2eced6d21efcc941c0ae8'")) {
+if (-not $localSource.Contains("`$templateRevision = '1420019054e9a5a8981726df25adebb96873e56b'")) {
   throw 'new-saas must pin the reviewed template commit'
 }
 if ($localSource.Contains('$installCommand') -or $localSource -match 'install .*studio-saas') {
