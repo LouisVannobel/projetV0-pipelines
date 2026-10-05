@@ -207,7 +207,7 @@ sha256sum() {
   printf 'sha256sum\\t%s\\n' "$line" >>"$COMMAND_LOG"
   expected="\${line%%  *}"
   file="\${line#*  }"
-  if [[ "$expected" == 5c16d8ddb971cb1d5e6ed8b1e743da8224414eeba2c2762d8f1a61b2f095699e ]]; then
+  if [[ "$expected" == 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0 ]]; then
     [[ "$file" == "$RUNNER_TEMP/go-containerregistry_Linux_x86_64.tar.gz" ]]
     touch "$CHECKSUM_MARKER"
   else
@@ -311,7 +311,7 @@ test('live-shaped raw OCI graph succeeds and emits sanitized evidence', () => {
   assert.match(result.commandLog, new RegExp(`crane\\tmanifest\\t${image}@${fixtures.platform.digest}`));
   assert.match(result.commandLog, new RegExp(`crane\\tmanifest\\t${image}@${fixtures.attestation.digest}`));
   assert.match(result.commandLog, /crane\tblob\t.*\ncrane\tblob\t/);
-  assert.match(result.commandLog, /sha256sum\t5c16d8ddb971cb1d5e6ed8b1e743da8224414eeba2c2762d8f1a61b2f095699e/);
+  assert.match(result.commandLog, /sha256sum\t0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0/);
   assert.equal(fs.existsSync(result.evidencePath), true);
   const evidence = JSON.parse(fs.readFileSync(result.evidencePath, 'utf8'));
   assert.deepEqual(Object.keys(evidence).sort((left, right) => left.localeCompare(right)), [

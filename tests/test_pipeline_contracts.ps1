@@ -459,7 +459,7 @@ $containerBuilds = @([regex]::Matches($containerRelease, '(?m)^\s*uses:\s+docker
 if ($containerBuilds.Count -ne 1) { throw 'Container release must build exactly once before scanning its pushed digest' }
 foreach ($requiredReleaseControl in @(
   'outputs: type=image,name=${{ steps.release-image.outputs.image }},push-by-digest=true,name-canonical=true,push=true',
-  'sbom: generator=docker/buildkit-syft-scanner:1.11.0@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68',
+  'sbom: generator=docker/buildkit-syft-scanner:1.12.0@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9',
   'provenance: mode=max',
   'RELEASE_IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"',
   'RELEASE_DIGEST="${{ steps.build.outputs.digest }}"',
@@ -610,7 +610,7 @@ function Assert-TailscalePayloadPin([string]$DeployJob) {
       $dokployStep.Value -notmatch '(?m)^ {8}uses: LouisVannobel/projetV0-pipelines/[.]github/actions/deploy-dokploy@3f385a4857ff7a85fcaa414296321154783272da # v1[.]4[.]0\r?$') {
     throw 'The second production step must retain the immutable reviewed Dokploy action pin'
   }
-  if ($tailscaleStep.Value -notmatch '(?m)^ {8}uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4[.]1[.]3\r?$') {
+  if ($tailscaleStep.Value -notmatch '(?m)^ {8}uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4[.]2[.]0\r?$') {
     throw 'The Tailscale step must retain its immutable reviewed action pin'
   }
   $tailscaleWith = [regex]::Match($tailscaleStep.Value, '(?ms)^ {8}with:[ \t]*\r?\n(?<body>(?:^ {10}[^\r\n]*(?:\r?\n|\z))+)')
@@ -634,7 +634,7 @@ $swapToken = '__TAILSCALE_STEP_SWAP__'
 $swappedDeploySteps = $containerDeployCallerJob.Replace($canonicalDeploySteps[0].Value, $swapToken).Replace($canonicalDeploySteps[1].Value, $canonicalDeploySteps[0].Value).Replace($swapToken, $canonicalDeploySteps[1].Value)
 $secondTailscaleStep = @'
       - name: Reinstall Tailscale
-        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
         with:
           version: latest
 '@
@@ -663,7 +663,7 @@ foreach ($requiredLocalDeployControl in @(
   'contents: read',
   'id-token: write',
   'environment: production',
-  'tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3',
+  'tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0',
   'oauth-client-id: ${{ vars.TS_WIF_CLIENT_ID }}',
   'audience: ${{ vars.TS_WIF_AUDIENCE }}',
   'tags: tag:deploy',

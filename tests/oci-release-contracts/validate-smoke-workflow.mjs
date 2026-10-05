@@ -79,8 +79,8 @@ export function validateSmokeWorkflow(workflow) {
   if (typeof inspect?.run === 'string') {
     const run = inspect.run;
     for (const [needle, message] of [
-      ['CRANE_VERSION=0.21.9', 'pin crane 0.21.9'],
-      ['5c16d8ddb971cb1d5e6ed8b1e743da8224414eeba2c2762d8f1a61b2f095699e', 'verify the crane archive checksum'],
+      ['CRANE_VERSION=0.22.1', 'pin crane 0.22.1'],
+      ['0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0', 'verify the crane archive checksum'],
       ['crane manifest "$IMAGE_REFERENCE"', 'read the raw root index'],
       ['crane blob', 'read raw in-toto blobs'],
       ['application/vnd.docker.attestation.manifest.v1+json', 'validate the attestation artifact type'],
