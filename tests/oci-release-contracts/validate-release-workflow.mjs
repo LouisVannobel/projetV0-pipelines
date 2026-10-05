@@ -4,15 +4,15 @@ import { pathToFileURL } from 'node:url';
 import { parse } from 'yaml';
 
 const refs = {
-  build: 'docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a',
+  build: 'docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc',
   checkout: 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
   login: 'docker/login-action@dbcb813823bdd20940b903addbd779551569679f',
-  setup: 'docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e',
+  setup: 'docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069',
   trivy: 'aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25',
   upload: 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
 };
-const buildkit = 'image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8';
-const syft = 'docker/buildkit-syft-scanner:1.11.0@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68';
+const buildkit = 'image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea';
+const syft = 'docker/buildkit-syft-scanner:1.12.0@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9';
 const exporter = 'type=image,name=${{ inputs.image }},push-by-digest=true,name-canonical=true,push=true';
 const releaseOutputs = ['image-digest', 'image-reference', 'sbom-artifact'];
 const canonicalRunJobs = {
@@ -112,7 +112,7 @@ function validateJobSetup(jobs, errors) {
     const setups = jobSteps.filter((step) => typeof step?.uses === 'string'
       && normalizeUse(step.uses).startsWith('docker/setup-buildx-action@'));
     fail(errors, setups.length === 1 && normalizeUse(setups[0].uses) === refs.setup && sameRecord(setups[0].with, {
-      version: 'v0.36.1',
+      version: 'v0.37.2',
       'driver-opts': buildkit
     }), `Buildx: ${jobName} needs exactly one pinned setup`);
 
@@ -218,7 +218,7 @@ function validateVerify(workflow, jobs, verify, errors) {
   fail(errors, trivyStep.with?.['image-ref'] === '${{ env.IMAGE_REFERENCE }}',
     'Trivy: canonical env.IMAGE_REFERENCE with no suffix is required');
   fail(errors, sameRecord(trivyStep.with, {
-    version: 'v0.74.0',
+    version: 'v0.75.0',
     'scan-type': 'image',
     'image-ref': '${{ env.IMAGE_REFERENCE }}',
     scanners: 'vuln,secret',

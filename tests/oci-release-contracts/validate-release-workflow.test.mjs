@@ -61,8 +61,8 @@ rejects('rejects a decoy workflow output mapping',
   'value: ${{ jobs.promote.outputs.image-digest }}',
   'value: ${{ steps.result.outputs.image-digest }}', 'workflow output image-digest:');
 rejects('rejects a detached second build action',
-  'uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a',
-  'uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a\n      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a',
+  'uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc',
+  'uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc\n      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc',
   'build: exactly one');
 rejectsObjectMutation('rejects the sole build action moved outside jobs.build.steps', (workflow) => {
   const index = workflow.jobs.build.steps.findIndex((step) => step.id === 'build');
@@ -173,7 +173,7 @@ rejects('rejects a write credential in the verify login',
   'password: ${{ secrets.registry-read-password }}',
   'password: ${{ secrets.registry-password }}', 'login: verify');
 rejects('rejects a mutable Syft generator',
-  'docker/buildkit-syft-scanner:1.11.0@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68',
+  'docker/buildkit-syft-scanner:1.12.0@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9',
   'docker/buildkit-syft-scanner:stable-1', 'Syft:');
 rejectsObjectMutation('rejects a missing attestation behavior scalar', (workflow) => {
   workflow.jobs.verify.steps = workflow.jobs.verify.steps.filter((step) => step.id !== 'verify-attestations');
@@ -203,7 +203,7 @@ rejects('rejects a missing read-only registry credential interface',
   '', 'secrets:');
 rejectsObjectMutation('rejects a case-variant duplicate build action', (workflow) => {
   workflow.jobs.verify.steps.push({
-    uses: 'Docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a'
+    uses: 'Docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc'
   });
 }, 'build: exactly one');
 rejectsObjectMutation('rejects a case-variant duplicate Trivy action', (workflow) => {
