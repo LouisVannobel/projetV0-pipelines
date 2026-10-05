@@ -34,7 +34,7 @@ pwsh -File scripts/new-saas.ps1 invoice-ai
 
 Cette commande crée le dépôt privé depuis le template, une application Dokploy et une identité dédiée, applique les protections GitHub, puis attend la première release saine. Le profil standard est volontairement fixe : stateless, `ops01`, `/health`, 512 MiB, 1 CPU, sans domaine public, base, Redis ni stockage.
 
-Le générateur courant attend exactement le template accepté `1420019054e9a5a8981726df25adebb96873e56b`, dont les callers CI et release utilisent `v1.6.0` (`ea76863f0150367edd8ceeec9bf43661e28d1597`). Les refus de dérive du template et des fichiers critiques restent actifs. Le helper installé conserve ses octets et son empreinte approuvés ; les qualifications produit du candidat TanStack/Effect restent distinctes de ce profil historique. Cette intégration ne déclenche aucun déploiement.
+Le générateur courant attend exactement le template accepté `0f8180d20451a84d729b1b361ada2ebf0be1db34`, dont les callers CI et release utilisent `v1.6.0` (`ea76863f0150367edd8ceeec9bf43661e28d1597`). Les refus de dérive du template et des fichiers critiques restent actifs. Le helper installé conserve ses octets et son empreinte approuvés ; les qualifications produit du candidat TanStack/Effect restent distinctes de ce profil historique. Cette intégration ne déclenche aucun déploiement.
 
 L'installation ou la mise à jour root du helper est une opération de plateforme séparée : `pwsh -File scripts/install-studio-saas.ps1`. Elle ne fait pas partie de la création normale d'un SaaS.
 
