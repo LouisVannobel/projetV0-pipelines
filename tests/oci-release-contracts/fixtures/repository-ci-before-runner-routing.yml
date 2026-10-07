@@ -3,10 +3,6 @@ name: Reusable repository CI
 on:
   workflow_call:
     inputs:
-      runs-on:
-        description: JSON array of runner labels
-        type: string
-        default: '["ubuntu-24.04"]'
       run-infrastructure-static:
         description: Run repository-local infrastructure validation without deployment credentials
         type: boolean
@@ -18,7 +14,7 @@ permissions:
 jobs:
   repository-security:
     name: Repository security
-    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout full history without persisted credentials
@@ -73,7 +69,7 @@ jobs:
   infrastructure-static:
     name: Infrastructure static validation
     if: inputs.run-infrastructure-static
-    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Checkout without persisted credentials
