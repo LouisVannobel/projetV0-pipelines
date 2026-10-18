@@ -224,6 +224,37 @@ if ($saasExample -match '(?ms)^\s+with:\s*$') {
   throw 'The SaaS example must rely on reusable workflow defaults and omit inputs'
 }
 
+function Assert-SaasQualityTimeoutContract {
+  param([Parameter(Mandatory)][string]$Workflow)
+
+  $workflowCall = [regex]::Match($Workflow, '(?ms)^  workflow_call:[ \t]*\r?\n(?<body>.*?)(?=^\S|\z)').Groups['body'].Value
+  $inputs = [regex]::Match($workflowCall, '(?ms)^ {4}inputs:[ \t]*\r?\n(?<body>.*?)(?=^ {4}\S|\z)').Groups['body'].Value
+  $timeoutInputs = @([regex]::Matches($inputs, '(?ms)^ {6}quality-timeout-minutes:[ \t]*\r?\n.*?(?=^ {6}\S|\z)'))
+  if ($timeoutInputs.Count -ne 1 -or @([regex]::Matches($Workflow, '(?m)^ {6}quality-timeout-minutes:')).Count -ne 1) {
+    throw 'SaaS quality timeout must declare exactly one workflow-call input'
+  }
+  $timeoutInputBlock = $timeoutInputs[0].Value
+  foreach ($field in @{ type = 'number'; default = '20' }.GetEnumerator()) {
+    if (@([regex]::Matches($timeoutInputBlock, "(?m)^ {8}$($field.Key):")).Count -ne 1 -or $timeoutInputBlock -notmatch ('(?m)^ {8}' + $field.Key + ':[ \t]+' + $field.Value + '[ \t]*\r?$')) {
+      throw "SaaS quality timeout input must retain $($field.Key): $($field.Value)"
+    }
+  }
+  if ($timeoutInputBlock -match '(?m)^ {8}required:' -and $timeoutInputBlock -notmatch '(?m)^ {8}required:[ \t]+false[ \t]*\r?$') { throw 'SaaS quality timeout input must remain optional' }
+
+  $quality = [regex]::Match($Workflow, '(?ms)^  quality:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
+  $binding = '    timeout-minutes: ${{ inputs.quality-timeout-minutes }}'
+  if (@([regex]::Matches($quality, '(?m)^ {4}timeout-minutes:')).Count -ne 1 -or $quality -notmatch ('(?m)^' + [regex]::Escape($binding) + '[ \t]*\r?$')) {
+    throw 'Only the SaaS quality job timeout must bind directly to its input'
+  }
+  if (@([regex]::Matches($Workflow, [regex]::Escape('inputs.quality-timeout-minutes'))).Count -ne 1) { throw 'SaaS quality timeout input must be consumed only once' }
+  foreach ($fixed in @{ 'secrets-and-source' = 15; accessibility = 20; container = 30 }.GetEnumerator()) {
+    $job = [regex]::Match($Workflow, ('(?ms)^  ' + $fixed.Key + ':\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)')).Value
+    if (@([regex]::Matches($job, '(?m)^ {4}timeout-minutes:')).Count -ne 1 -or $job -notmatch ('(?m)^ {4}timeout-minutes:[ \t]+' + $fixed.Value + '[ \t]*\r?$')) {
+      throw "SaaS $($fixed.Key) timeout must remain fixed at $($fixed.Value) minutes"
+    }
+  }
+}
+
 function Assert-SaasQualityFallowContract {
   param([Parameter(Mandatory)][string]$Workflow)
 
@@ -377,6 +408,26 @@ function Assert-SaasCoverageRunBlock {
 }
 
 $saasCi = Get-Content -Raw -LiteralPath '.github\workflows\reusable-saas-ci.yml'
+Assert-SaasQualityTimeoutContract -Workflow $saasCi
+$timeoutInput = [regex]::Match($saasCi, '(?ms)^ {6}quality-timeout-minutes:[ \t]*\r?\n.*?(?=^ {6}\S|^\S|\z)').Value
+$timeoutBinding = '${{ inputs.quality-timeout-minutes }}'
+$accessibilityJob = [regex]::Match($saasCi, '(?ms)^  accessibility:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
+$timeoutContractMutations = @{
+  'missing input' = $saasCi.Replace($timeoutInput, '')
+  'duplicate input' = $saasCi.Replace($timeoutInput, $timeoutInput + $timeoutInput)
+  'string type' = $saasCi.Replace($timeoutInput, $timeoutInput.Replace('type: number', 'type: string'))
+  'changed default' = $saasCi.Replace($timeoutInput, $timeoutInput.Replace('default: 20', 'default: 21'))
+  'required input' = $saasCi.Replace($timeoutInput, $timeoutInput.Replace('type: number', "type: number`n        required: true"))
+  'hardcoded quality' = $saasCi.Replace($timeoutBinding, '20')
+  'wrong input binding' = $saasCi.Replace($timeoutBinding, '${{ inputs.node-version }}')
+  'binding moved to accessibility' = $saasCi.Replace($timeoutBinding, '20').Replace($accessibilityJob, $accessibilityJob.Replace('timeout-minutes: 20', ('timeout-minutes: ' + $timeoutBinding)))
+}
+foreach ($mutation in $timeoutContractMutations.GetEnumerator()) {
+  if ($mutation.Value -ceq $saasCi) { throw "SaaS quality timeout mutation did not alter the workflow: $($mutation.Key)" }
+  $rejected = $false
+  try { Assert-SaasQualityTimeoutContract -Workflow $mutation.Value } catch { $rejected = $true }
+  if (-not $rejected) { throw "SaaS quality timeout contract accepted mutation: $($mutation.Key)" }
+}
 Assert-SaasQualityFallowContract -Workflow $saasCi
 Assert-SaasCoverageRunBlock -Workflow $saasCi
 

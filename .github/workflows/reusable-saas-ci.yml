@@ -15,6 +15,10 @@ on:
         description: Directory containing package.json and pnpm-lock.yaml
         type: string
         default: "."
+      quality-timeout-minutes:
+        description: Maximum duration of the quality job in minutes
+        type: number
+        default: 20
       run-a11y:
         description: Run the Playwright test:a11y script
         type: boolean
@@ -79,7 +83,7 @@ jobs:
   quality:
     name: TypeScript quality and tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: ${{ inputs.quality-timeout-minutes }}
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}

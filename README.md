@@ -14,6 +14,8 @@ Les contrats locaux exécutent le vrai script du gate sur les résultats activé
 
 Le job qualité installe les dépendances verrouillées, lint, construit la production puis exécute une seule fois `pnpm run test`, avant Fallow, React Doctor et le typecheck. Chaque caller conserve son script de test et ses prérequis spécifiques ; ce workflow n'installe ni provider de couverture ni décodeur audio pour les autres dépôts.
 
+Le job qualité conserve une limite de 20 minutes par défaut. Un caller peut définir l'input numérique `quality-timeout-minutes` sous `jobs.<job>.with`, par exemple `quality-timeout-minutes: 35`. Cette option ne change que la durée maximale du job qualité ; les autres jobs, les scripts du caller, leurs délais internes et les gates restent inchangés.
+
 La couverture est opt-in via un chemin non null dans `health.coverage` de la `.fallowrc.json` du caller. Le test doit alors produire un JSON Istanbul non vide dans ce même checkout. Le contrôle refuse une carte manquante, malformée, périmée, liée ou extérieure, des chemins source non canoniques ou différents du checkout courant, ainsi que des positions/maps/counters incohérents. Les counters zéro sont valides : une fonction réellement non couverte ne devient pas couverte. Sans ce champ ou avec son défaut natif `null`, le script de test existant est conservé sans provider imposé ; toute autre valeur malformée est refusée.
 
 Les clés source et leur champ `path` doivent être identiques et absolument canoniques pour la plateforme courante. Sur Windows, la forme native et sa forme exacte avec `/`, produite par Istanbul, désignent la même identité source ; les mélanges de séparateurs, segments relatifs et doublons entre ces deux formes restent refusés. Le contrôle ne réécrit pas la carte.
