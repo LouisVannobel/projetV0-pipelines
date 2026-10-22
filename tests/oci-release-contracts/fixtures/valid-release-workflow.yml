@@ -72,8 +72,8 @@ jobs:
           [[ ! "${VERSION,,}" =~ ^sha-[0-9a-f]{40}$ ]]
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
         with:
-          version: v0.37.2
-          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+          version: v0.38.0
+          driver-opts: image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ${{ inputs.registry }}
@@ -104,8 +104,8 @@ jobs:
     steps:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
         with:
-          version: v0.37.2
-          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+          version: v0.38.0
+          driver-opts: image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ${{ inputs.registry }}
@@ -113,7 +113,7 @@ jobs:
           password: ${{ secrets.registry-read-password }}
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
-          version: v0.75.0
+          version: v0.76.0
           scan-type: image
           image-ref: ${{ env.IMAGE_REFERENCE }}
           scanners: vuln,secret
@@ -160,12 +160,12 @@ jobs:
                   or not isinstance(builder_id, str) or not builder_id.strip()):
               raise SystemExit("invalid SLSA predicate")
           PY
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: sbom-${{ github.sha }}
           path: sbom.spdx.json
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: provenance-${{ github.sha }}
           path: provenance.slsa.json
@@ -194,8 +194,8 @@ jobs:
     steps:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
         with:
-          version: v0.37.2
-          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+          version: v0.38.0
+          driver-opts: image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ${{ inputs.registry }}

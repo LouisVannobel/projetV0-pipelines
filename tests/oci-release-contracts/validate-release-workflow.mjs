@@ -9,9 +9,9 @@ const refs = {
   login: 'docker/login-action@dbcb813823bdd20940b903addbd779551569679f',
   setup: 'docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069',
   trivy: 'aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25',
-  upload: 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
+  upload: 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
 };
-const buildkit = 'image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea';
+const buildkit = 'image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c';
 const syft = 'docker/buildkit-syft-scanner:1.12.0@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9';
 const exporter = 'type=image,name=${{ inputs.image }},push-by-digest=true,name-canonical=true,push=true';
 const releaseOutputs = ['image-digest', 'image-reference', 'sbom-artifact'];
@@ -112,7 +112,7 @@ function validateJobSetup(jobs, errors) {
     const setups = jobSteps.filter((step) => typeof step?.uses === 'string'
       && normalizeUse(step.uses).startsWith('docker/setup-buildx-action@'));
     fail(errors, setups.length === 1 && normalizeUse(setups[0].uses) === refs.setup && sameRecord(setups[0].with, {
-      version: 'v0.37.2',
+      version: 'v0.38.0',
       'driver-opts': buildkit
     }), `Buildx: ${jobName} needs exactly one pinned setup`);
 
@@ -218,7 +218,7 @@ function validateVerify(workflow, jobs, verify, errors) {
   fail(errors, trivyStep.with?.['image-ref'] === '${{ env.IMAGE_REFERENCE }}',
     'Trivy: canonical env.IMAGE_REFERENCE with no suffix is required');
   fail(errors, sameRecord(trivyStep.with, {
-    version: 'v0.75.0',
+    version: 'v0.76.0',
     'scan-type': 'image',
     'image-ref': '${{ env.IMAGE_REFERENCE }}',
     scanners: 'vuln,secret',

@@ -6,6 +6,16 @@
     "helpers:pinGitHubActionDigests"
   ],
   "dependencyDashboard": true,
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/__fixtures__/**",
+    "**/fixtures/**"
+  ],
   "minimumReleaseAge": "7 days",
   "prConcurrentLimit": 5,
   "prHourlyLimit": 2,
