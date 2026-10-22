@@ -22,10 +22,21 @@
   "rangeStrategy": "pin",
   "schedule": ["after 07:00 and before 10:00 on monday"],
   "labels": ["dependencies"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.yml$/"],
+      "matchStrings": [
+        "(?:^|\\r?\\n)[\\t ]+driver-opts:[\\t ]+image=moby/buildkit:(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)@(?<currentDigest>sha256:[a-f0-9]{64})(?:[\\t ]*(?:\\r?\\n|$))"
+      ],
+      "depNameTemplate": "moby/buildkit",
+      "datasourceTemplate": "docker"
+    }
+  ],
   "packageRules": [
     {
       "description": "No dependency update bypasses human review during the experimental phase",
-      "matchManagers": ["github-actions", "dockerfile", "docker-compose", "npm"],
+      "matchManagers": ["github-actions", "dockerfile", "docker-compose", "npm", "custom.regex"],
       "automerge": false
     },
     {

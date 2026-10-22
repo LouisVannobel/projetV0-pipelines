@@ -2,6 +2,36 @@
 
 Workflows GitHub Actions réutilisables pour les SaaS du studio.
 
+## Outils CI et suivi Renovate
+
+Le lot du 22 octobre 2026 sélectionne Buildx `0.38.1`, BuildKit `0.34.1` et Trivy
+`0.76.1` par exception ponctuelle au délai de maturité de sept jours : leurs
+notes officielles annoncent le rejet des intermédiaires eMudhra compromis
+(CVE-2026-111943), avec Go `1.26.10` pour
+[Buildx](https://github.com/docker/buildx/releases/tag/v0.38.1) et
+[BuildKit](https://github.com/moby/buildkit/releases/tag/v0.34.1), et Go `1.27.3`
+pour [Trivy](https://github.com/aquasecurity/trivy/releases/tag/v0.76.1).
+Buildx et BuildKit annoncent une reconstruction sans changement fonctionnel ;
+Trivy comporte aussi des mises à jour de dépendances.
+
+Le pin BuildKit utilise l'index officiel
+`sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c`.
+Sa variante `linux/amd64` est
+`sha256:b651bf250c2805569f1db385ad1ea8fb73737dfc851de305f274ca02690fa93f`.
+Les hashes des métadonnées du registre, le sujet de la provenance publiée et
+sa source Git ont été rapprochés du tag officiel ; cela ne revendique pas de
+niveau SLSA ni une vérification indépendante du signataire. La CI source, le
+smoke OCI et les consommateurs réels restent nécessaires avant publication
+d'une nouvelle version des workflows et propagation de leurs callers.
+
+Renovate suit les versions embarquées de Trivy et Buildx avec son gestionnaire
+`github-actions`. Le seul gestionnaire personnalisé vise les références
+scalaires `driver-opts: image=moby/buildkit:vX.Y.Z@sha256:...` dans les fichiers
+à la racine de `.github/workflows/` ; il extrait ensemble le tag et le digest
+avec la datasource Docker. Exemples, documentation et fixtures sont exclus.
+Le calendrier, les sept jours de maturité par défaut et la revue humaine
+restent en vigueur, avec `automerge: false` explicite pour `custom.regex`.
+
 ## Gate SaaS et indépendance des contrôles
 
 Le check agrégé `CI / gate` s'exécute même après un échec ou un job sauté. Sécurité source et qualité doivent réussir. Pour `run-a11y` et `run-container`, une option activée exige `success` ; une option désactivée exige `skipped`. Un échec, une annulation ou un contrôle activé mais sauté garde le gate rouge. Le caller doit rendre le nom complet de ce check obligatoire sur sa branche principale ; le workflow seul ne protège pas une branche.
