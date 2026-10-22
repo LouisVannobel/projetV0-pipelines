@@ -99,7 +99,7 @@ export function validateSmokeWorkflow(workflow) {
       'evidence: obsolete in-toto v0.1 statement envelopes must be rejected');
   }
   fail(errors, upload.length === 1
-    && upload[0].uses === 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
+    && upload[0].uses === 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
     && upload[0]?.with?.path === 'oci-evidence.json'
     && upload[0]?.with?.['if-no-files-found'] === 'error',
   'evidence: must upload exactly the sanitized OCI evidence file');
