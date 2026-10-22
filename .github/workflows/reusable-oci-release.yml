@@ -3,6 +3,10 @@ name: Reusable OCI release
 on:
   workflow_call:
     inputs:
+      runs-on:
+        description: JSON array of runner labels
+        type: string
+        default: '["ubuntu-24.04"]'
       registry:
         description: OCI registry host
         type: string
@@ -51,7 +55,7 @@ permissions: {}
 jobs:
   build:
     name: Build canonical digest
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
     timeout-minutes: 35
     permissions:
       contents: read
@@ -112,7 +116,7 @@ jobs:
   verify:
     name: Scan and verify canonical digest
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
     timeout-minutes: 20
     permissions:
       packages: read
@@ -198,7 +202,7 @@ jobs:
     needs:
       - build
       - verify
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
     timeout-minutes: 15
     concurrency:
       group: projetv0-oci-promotion
